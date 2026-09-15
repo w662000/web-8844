@@ -1,0 +1,31 @@
+name: daily-pool
+on:
+  schedule:
+    - cron: "40 7 * * 1-5"   # 15:40 北京时间(UTC+8) 收盘后: 全市场日线 -> 池子筛选 -> 推送云端
+  workflow_dispatch: {}
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 拉取全市场日线
+        run: python cf_worker/fetch_bars.py cf_worker/codes.json bars.json
+      - name: 筛选池子并推送云端
+        env:
+          WORKER_URL: https://webmon.wxatp.workers.dev
+          AUTH_TOKEN: ${{ secrets.WORKER_AUTH_TOKEN }}
+        run: python cf_worker/cloud_screen.py bars.json pool.json
+      - name: 存档 pool.json
+        run: |
+          mkdir -p archive
+          cp pool.json archive/pool.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pool
+          path: pool.json
+          retention-days: 30
