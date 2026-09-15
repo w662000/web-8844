@@ -5,8 +5,8 @@ fetch_bars.py — 云端数据采集 v2：双源分流（2026-09-15 实测定稿
 GitHub 美国节点实测（每源3次）:
   qt.gtimg 实时 0.71s | ifzq 日K 0.98s | push2his 日K 1.41s | sinajs 实时 0.59s
   push2 实时 302 不可用 | 新浪日K 返回异常不可用
-策略: 主板代码对半分 -> 腾讯ifzq(单线程域限流独立) + 东财push2his 各拉一半,
-     失败自动切另一源补拉; 源内并发 10（单IP高并发触发腾讯限速的教训）。
+策略(2026-09-15 用户拍板 v3): **东财 push2his 主拉全量 -> 腾讯 ifzq 备用补拉 -> 东财低并发重试**;
+     源内并发 10（单IP高并发触发限速的教训）；GitHub 实测: ifzq 0.98s / push2his 1.41s / push2实时302不可用。
 输出: bars.json {"generated","date","bars":{code:{"k":[[d,o,c,h,l,v]...],"name"}}}
 """
 import io
@@ -81,21 +81,19 @@ def main():
     out_path = sys.argv[2] if len(sys.argv) > 2 else "bars.json"
     codes = [c for c in json.loads(Path(codes_path).read_text(encoding="utf-8"))
              if c.startswith(("60", "00"))]
-    print(f"主板待拉取: {len(codes)} 只（双源分流: 腾讯ifzq + 东财push2his）")
+    print(f"主板待拉取: {len(codes)} 只（东财主拉 / 腾讯备用）")
 
     t0 = time.time()
     print("拉取名称中...")
     names = fetch_names(codes)
 
-    half = (len(codes) + 1) // 2
-    plan = [("tencent", codes[:half]), ("east", codes[half:])]
     results = {}
     lock = threading.Lock()
     stats = {"tencent": [0, 0], "east": [0, 0]}  # ok, fail
 
-    def run_source(source, scodes):
+    def run_source(source, scodes, workers=PER_SOURCE_THREADS):
         fetcher = fetch_tencent if source == "tencent" else fetch_east
-        with ThreadPoolExecutor(max_workers=PER_SOURCE_THREADS) as ex:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(fetcher, ("sh" if c[0] == "6" else "sz") + c): c for c in scodes}
             for fut in as_completed(futs):
                 c = futs[fut]
@@ -108,24 +106,18 @@ def main():
                     with lock:
                         stats[source][1] += 1
 
-    threads = [threading.Thread(target=run_source, args=(s, cs)) for s, cs in plan if cs]
-    for th in threads:
-        th.start()
-    while any(th.is_alive() for th in threads):
-        time.sleep(5)
-        done = sum(s[0] for s in stats.values())
-        print(f"  进度 {done}/{len(codes)} 腾讯✓{stats['tencent'][0]}✗{stats['tencent'][1]} 东财✓{stats['east'][0]}✗{stats['east'][1]} {time.time()-t0:.0f}s")
-
-    # 失败的码用另一源补拉（串行, 数量少）
+    # 第一遍: 东财主拉全量
+    run_source("east", codes)
+    # 第二遍: 失败的码用腾讯补拉（备用源）
     missing = [c for c in codes if c not in results]
     if missing:
-        print(f"补拉失败码 {len(missing)} 只（跨源）")
-        other = fetch_east if stats["tencent"][1] >= stats["east"][1] else fetch_tencent
-        for c in missing:
-            try:
-                results[c] = other(("sh" if c[0] == "6" else "sz") + c)
-            except Exception:
-                pass
+        print(f"腾讯备用补拉 {len(missing)} 只")
+        run_source("tencent", missing)
+    # 第三遍: 仍缺的东财低并发重试
+    missing2 = [c for c in codes if c not in results]
+    if missing2:
+        print(f"东财重试 {len(missing2)} 只")
+        run_source("east", missing2)
 
     bars = {c: {"k": k, "name": names.get(c, "")} for c, k in results.items() if len(k) >= 30}
     last_date = max((v["k"][-1][0] for v in bars.values()), default="")
