@@ -120,8 +120,8 @@ def main():
             req = urllib.request.Request(wurl + "/pool", data=json.dumps(out, ensure_ascii=False).encode(),
                 method="POST", headers={"x-auth-token": atok, "Content-Type": "application/json",
                                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            op = urllib.request.build_opener(urllib.request.ProxyHandler(
-                {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}))
+            px = {k: v for k, v in {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}.items() if v}
+            op = urllib.request.build_opener(urllib.request.ProxyHandler(px))
             print("WORKER_SYNC", op.open(req, timeout=20).status)
         except Exception as e:
             print("WORKER_SYNC_FAIL", str(e)[:120])
