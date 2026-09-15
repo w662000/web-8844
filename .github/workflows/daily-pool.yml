@@ -21,5 +21,7 @@ jobs:
         if: always()
         with:
           name: pool
-          path: pool.json
+          path: |
+            pool.json
+            cf_worker/pool_cloud.json
           retention-days: 30
