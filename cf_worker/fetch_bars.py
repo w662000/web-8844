@@ -23,8 +23,9 @@ from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
-PROXIES = {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}
-OPENER = urllib.request.build_opener(urllib.request.ProxyHandler(PROXIES))
+_px = {k: v for k, v in {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}.items() if v}
+# 注意: Actions 上无代理环境变量, 必须直连; 空字符串代理会让所有请求瞬间失败
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler(_px))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 PER_SOURCE_THREADS = 10
 NBARS = 60
