@@ -34,6 +34,9 @@ PROJ = Path(__file__).parent.parent
 CN_TZ = timezone(timedelta(hours=8))
 
 
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
 def cn_now():
     return datetime.now(CN_TZ)
 
@@ -52,19 +55,34 @@ def cfg():
     return wurl, atok
 
 
-def http_get(url, timeout=15, referer=None):
+def make_opener(use_proxy):
+    px = {k: v for k, v in {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}.items() if v} if use_proxy else {}
+    return urllib.request.build_opener(urllib.request.ProxyHandler(px))
+
+
+CN_OPENER = make_opener(False)  # 腾讯/东财等国内源: 直连
+
+
+def worker_opener():
+    # workers.dev 从国内直连被 SNI 阻断: 本机走代理, Actions 无代理变量时自动直连
+    px = {k: v for k, v in {"http": os.environ.get("HTTP_PROXY", ""), "https": os.environ.get("HTTPS_PROXY", "")}.items() if v}
+    return urllib.request.build_opener(urllib.request.ProxyHandler(px))
+
+
+def http_get(url, timeout=15, referer=None, opener=None):
     h = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     if referer:
         h["Referer"] = referer
     req = urllib.request.Request(url, headers=h)
-    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout).read()
+    op = opener or CN_OPENER
+    return op.open(req, timeout=timeout).read()
 
 
 def http_post_json(url, obj, atok):
     req = urllib.request.Request(url, data=json.dumps(obj, ensure_ascii=False).encode("utf-8"),
         method="POST", headers={"x-auth-token": atok, "Content-Type": "application/json",
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=60).read().decode()
+    return worker_opener().open(req, timeout=60).read().decode()
 
 
 def ema7_of(closes):
@@ -128,13 +146,32 @@ def screen_one(code, bars):
             "zt_date": bars[i][0], "deep": round((zt_close - min_c) / zt_close * 100, 2)}
 
 
+
+def worker_get(url):
+    """workers.dev 会按 TLS 指纹拦 Python-urllib, 必须用 curl 子进程（自动适配两环境代理）"""
+    import subprocess
+    r = subprocess.run(["curl", "-sS", "-m", "120", "-A", UA, url],
+                       capture_output=True, timeout=150)
+    return r.stdout.decode("utf-8", "replace")
+
+
+def worker_post(url, obj, atok):
+    import subprocess
+    tmp = Path(os.environ.get("TEMP", "/tmp")) / "cf_post_body.json"
+    tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run(["curl", "-sS", "-m", "180", "-X", "POST", "-A", UA,
+                        "-H", "x-auth-token: " + atok, "-H", "Content-Type: application/json",
+                        "--data-binary", "@" + str(tmp), url], capture_output=True, timeout=220)
+    return r.stdout.decode("utf-8", "replace")
+
 def update():
     wurl, atok = cfg()
+    WOP = worker_opener()
     # 0. 新上市股票: codes.json 里有而 bars 里没有的 -> 从 ifzq 拉 60日历史（每月几只，开销极小）
     codes_file = Path(__file__).parent / "codes.json"
     all_codes = list(json.loads(codes_file.read_text(encoding="utf-8")).keys()) if codes_file.exists() else []
-    # 1. 云端 60 日历史
-    raw = http_get(wurl + "/bars.json", timeout=60).decode("utf-8", "replace")
+    # 1. 云端 60 日历史（经代理: workers.dev 国内直连被阻断）
+    raw = worker_get(wurl + "/bars.json")
     bj = json.loads(raw)
     bars = bj.get("bars", {})
     print(f"云端 bars: {len(bars)} 只, 截至 {bj.get('date')}")
@@ -185,7 +222,8 @@ def update():
         tq = today_quotes.get(c)
         if not tq:
             continue
-        bdate = tq["date"] or today_cn
+        bd8 = tq["date"] or today_cn.strftime("%Y%m%d")
+        bdate = bd8[:4] + "-" + bd8[4:6] + "-" + bd8[6:8]
         if tq["vol"] == 0 and tq["close"] <= 0:
             skipped_susp += 1
             continue
@@ -224,8 +262,8 @@ def update():
     print(f"POOL_OK date={pool['date']} entries={len(entries)}")
 
     # 5. 推回云端
-    r1 = http_post_json(wurl + "/bars.json", bars_out, atok)
-    r2 = http_post_json(wurl + "/pool.json", pool, atok)
+    r1 = worker_post(wurl + "/bars.json", bars_out, atok)
+    r2 = worker_post(wurl + "/pool.json", pool, atok)
     print("WORKER_SYNC bars:", r1[:80], "| pool:", r2[:80])
 
 
