@@ -130,11 +130,30 @@ def screen_one(code, bars):
 
 def update():
     wurl, atok = cfg()
+    # 0. 新上市股票: codes.json 里有而 bars 里没有的 -> 从 ifzq 拉 60日历史（每月几只，开销极小）
+    codes_file = Path(__file__).parent / "codes.json"
+    all_codes = list(json.loads(codes_file.read_text(encoding="utf-8")).keys()) if codes_file.exists() else []
     # 1. 云端 60 日历史
     raw = http_get(wurl + "/bars.json", timeout=60).decode("utf-8", "replace")
     bj = json.loads(raw)
     bars = bj.get("bars", {})
     print(f"云端 bars: {len(bars)} 只, 截至 {bj.get('date')}")
+    fresh = [c for c in all_codes if c.startswith(("60", "00")) and c not in bars]
+    if fresh:
+        print(f"新上市/缺失 {len(fresh)} 只, 从 ifzq 拉 60 日历史...")
+        for c in fresh[:50]:
+            sym = ("sh" if c[0] == "6" else "sz") + c
+            try:
+                j = json.loads(http_get("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" +
+                    urllib.parse.quote(sym) + ",day,,,60,").decode("utf-8", "replace"))
+                day = j.get("data", {}).get(sym, {}).get("day") or []
+                k = [[r[0], float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in day if len(r) >= 6]
+                if len(k) >= 30:
+                    bars[c] = {"k": k, "name": ""}
+            except Exception:
+                pass
+            time.sleep(0.2)
+        print(f"  补齐后 bars: {len(bars)} 只")
     codes = list(bars.keys())
 
     # 2. 批量腾讯行情取当日 OHLCV（60码/批）
