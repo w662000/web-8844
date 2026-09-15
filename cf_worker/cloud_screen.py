@@ -228,11 +228,11 @@ def update():
             skipped_susp += 1
             continue
         k = bars[c]["k"]
-        if k and k[-1][0] == bdate:
+        klast = k[-1][0].replace("-", "") if k and k[-1][0] else ""
+        if klast >= bd8:
+            # 同一交易日: 替换(顺带把日期格式统一为带横线)
             k[-1] = [bdate, tq["open"], tq["close"], tq["high"], tq["low"], tq["vol"]]
             replaced += 1
-        elif k and k[-1][0] > bdate:
-            skipped_old += 1  # 行情日期落后于已有K线(异常), 跳过
         else:
             k.append([bdate, tq["open"], tq["close"], tq["high"], tq["low"], tq["vol"]])
             if len(k) > 60:
