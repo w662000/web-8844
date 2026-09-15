@@ -1,0 +1,28 @@
+name: source-timing
+on:
+  workflow_dispatch: {}
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 各数据源计时(每源3次)
+        run: |
+          test_url() {
+            local name="$1" url="$2"
+            for i in 1 2 3; do
+              curl -o /dev/null -sS -m 15 -w "$name try$i: %{http_code} %{time_total}s size=%{size_download}\n" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -H "Referer: https://finance.sina.com.cn" "$url"
+            done
+          }
+          echo "== 1 腾讯实时行情 =="
+          test_url "qt.gtimg" "https://qt.gtimg.cn/q=sh603270,sh600000,sz000001"
+          echo "== 2 腾讯日K(ifzq) =="
+          test_url "ifzq" "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh603270,day,,,60,"
+          echo "== 3 东财实时 =="
+          test_url "push2" "https://push2.eastmoney.com/api/qt/ulist.np/get?secids=1.603270,0.000001&fields=f2,f3,f12,f14&fltt=2"
+          echo "== 4 东财日K(push2his) =="
+          test_url "push2his" "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.603270&klt=101&fqt=0&lmt=60&end=20500101&fields1=f1&fields2=f51,f52,f53,f54,f55,f56"
+          echo "== 5 新浪实时(sinajs) =="
+          test_url "sinajs" "https://hq.sinajs.cn/list=sh603270"
+          echo "== 6 新浪日K(money.finance) =="
+          test_url "sina-kline" "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=sh603270&scale=240&ma=no&datalen=60"
