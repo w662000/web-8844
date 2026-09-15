@@ -262,8 +262,10 @@ def update():
     print(f"POOL_OK date={pool['date']} entries={len(entries)}")
 
     # 5. 推回云端
+    out = Path(__file__).parent / "pool_cloud.json"
+    out.write_text(json.dumps(pool, ensure_ascii=False), encoding="utf-8")
     r1 = worker_post(wurl + "/bars.json", bars_out, atok)
-    r2 = worker_post(wurl + "/pool.json", pool, atok)
+    r2 = worker_post(wurl + "/pool", pool, atok)
     print("WORKER_SYNC bars:", r1[:80], "| pool:", r2[:80])
 
 
