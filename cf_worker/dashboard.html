@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>☁️ 云端看板 · 涨停回调监控</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2333;--border:#2a3142;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--red:#ff4d6d;--green:#3fb950;--yellow:#ffd60a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",sans-serif;padding:20px 14px;line-height:1.6}
+.wrap{max-width:1060px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#a371f7,#58a6ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block}
+.sub{color:var(--muted);font-size:12px;margin-bottom:12px}
+.ctrl{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+.ctrl select,.ctrl button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 10px;font-size:13px}
+.ctrl button{cursor:pointer}.ctrl button:hover{border-color:var(--accent)}
+.stausline{margin-left:auto;color:var(--muted);font-size:12px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.metric{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:11px 14px}
+.metric .v{font-size:22px;font-weight:700}.metric .k{font-size:11px;color:var(--muted)}
+.metric.red .v{color:var(--red)}.metric.green .v{color:var(--green)}.metric.blue .v{color:var(--accent)}.metric.yellow .v{color:var(--yellow)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.panel h2{font-size:14px;margin-bottom:10px;padding-left:9px;border-left:4px solid var(--green)}
+.panel.watch h2{border-left-color:var(--yellow)}
+.panel.mid h2{border-left-color:#3fb950}
+.panel.all h2{border-left-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.stk{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px 13px;position:relative}
+.stk.hit{border-color:var(--red);background:linear-gradient(90deg,rgba(255,77,109,.10),transparent)}
+.stk.near{border-color:rgba(255,214,10,.55);background:linear-gradient(90deg,rgba(255,214,10,.07),transparent)}
+.stk.far{opacity:.5;filter:saturate(.55)}
+.top{display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap}
+.name{font-size:15px;font-weight:700}.code{color:var(--muted);font-size:11px}
+.tag{font-size:10px;border-radius:9px;padding:1px 7px;border:1px solid var(--border);color:var(--muted)}
+.tag.b{color:var(--green);border-color:rgba(63,185,80,.45)}.tag.v{color:var(--red);border-color:rgba(255,77,109,.45)}
+.pct{margin-left:auto;font-weight:700}.up{color:var(--red)}.down{color:var(--green)}
+.row{display:flex;flex-wrap:wrap;gap:11px;font-size:12px;margin-bottom:5px}
+.row b{font-size:13px}
+.lbl{font-size:10px;color:var(--muted);margin-top:3px}
+.barw{height:7px;background:#0a0e14;border-radius:5px;overflow:hidden;margin-top:5px}
+.bar{height:100%;background:linear-gradient(90deg,#3fb950,#58a6ff);border-radius:5px}
+.empty{color:var(--muted);text-align:center;padding:26px 0}
+.foot{color:var(--muted);font-size:11px;text-align:center;margin-top:18px;line-height:1.8}
+</style></head><body>
+<div class="wrap">
+<h1>☁️ 云端看板 · 涨停回调监控</h1>
+<div class="sub" id="subinfo">独立于家里主机的云端引擎 · 数据源 = 云端 KV 池子快照 + 腾讯实时行情</div>
+<div class="ctrl">
+  刷新间隔 <select id="iv">
+    <option value="5000">5秒</option>
+    <option value="15000" selected>15秒</option>
+    <option value="30000">30秒</option>
+    <option value="60000">1分钟</option>
+  </select>
+  <button onclick="tick()">立即刷新</button>
+  <span class="stausline" id="lastUpd">未加载</span>
+</div>
+<div class="metrics">
+  <div class="metric blue"><div class="v" id="mAll">-</div><div class="k">池子总数</div></div>
+  <div class="metric red"><div class="v" id="mHit">-</div><div class="k">已突破EMA7</div></div>
+  <div class="metric green"><div class="v" id="mBuy">-</div><div class="k">突破且放量(量比≥1)</div></div>
+  <div class="metric yellow"><div class="v" id="mNear">-</div><div class="k">接近突破(≥98%)</div></div>
+  <div class="metric blue"><div class="v" id="mTick">-</div><div class="k">云端引擎最近运行</div></div>
+</div>
+<div class="panel"><h2>🚨 已突破 EMA7（放量✅优先）</h2><div class="grid" id="hitGrid"></div></div>
+<div class="panel watch"><h2>👀 未突破 · 观察池（接近程度排序）</h2><div class="grid" id="watchGrid"></div></div>
+<div class="panel mid"><h2>🚀 已突破EMA7 · 候选池（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="brokeGrid"></div></div>
+<div class="panel all"><h2>📋 池子全量（云端 KV 快照）</h2><div class="grid" id="allGrid"></div></div>
+<div class="foot" id="foot">☁️ 云端独立引擎：主机关机时本页数据与邮件推送照常（池子结构随主机关闭逐渐失真） · 实时价由浏览器直连腾讯行情</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let ENTRIES=[],META={},IV=15000,TIMER=null,PRICES={};
+function loadTencent(codes,done){
+  if(!codes.length){done(false);return;}
+  const s=document.createElement('script');
+  s.charset='gbk';
+  s.src='https://qt.gtimg.cn/q='+codes.map(c=>(c[0]==='6'?'sh':'sz')+c).join(',')+'&r='+Date.now();
+  s.onload=()=>{try{s.remove()}catch(e){};done(true)};
+  s.onerror=()=>{try{s.remove()}catch(e){};done(false)};
+  document.head.appendChild(s);
+}
+function parseQuotes(){
+  const out={};
+  for(const c of ENTRIES){
+    const v=window['v_'+(c.sym[0]==='6'?'sh':'sz')+c.sym];
+    if(v&&typeof v==='string'){
+      const f=v.split('~');
+      if(f.length>49) out[c.sym]={price:parseFloat(f[3]),pct:parseFloat(f[32])||0,vr:parseFloat(f[49])||0};
+    }
+  }
+  PRICES=out;
+}
+function arrow(p){return (p<0?'↓':'↑')+Math.abs(p).toFixed(2)+'%'}
+function render(){
+  let hit=0,buy=0,near=0;
+  const items=ENTRIES.map(e=>{
+    const pr=PRICES[e.sym]||{};
+    const price=pr.price||0, pct=pr.pct||0, vr=pr.vr||0;
+    const ratio=price&&e.ey?price/e.ey:0;
+    const broke=price>0&&e.ey&&price>e.ey;
+    if(broke){hit++; if(vr>=1.0)buy++;}
+    else if(ratio>=0.98)near++;
+    return {e,price,pct,vr,ratio,broke};
+  }).sort((a,b)=>{
+    const ra=a.broke?(a.vr>=1?0:1):(a.ratio>=0.98?2:3);
+    const rb=b.broke?(b.vr>=1?0:1):(b.ratio>=0.98?2:3);
+    return ra-rb;
+  });
+  const hitHtml=items.filter(i=>i.broke).map(card).join('')||'<div class="empty">无</div>';
+  const watchHtml=items.filter(i=>!i.broke).map(card).join('')||'<div class="empty">无</div>';
+  const brokeHtml=items.filter(i=>i.broke).map(card).join('')||'<div class="empty">无</div>';
+  const allHtml=items.map(card).join('');
+  $('hitGrid').innerHTML=hitHtml;
+  $('watchGrid').innerHTML=watchHtml;
+  $('brokeGrid').innerHTML=brokeHtml;
+  $('allGrid').innerHTML=allHtml;
+  $('mAll').textContent=ENTRIES.length;
+  $('mHit').textContent=hit;
+  $('mBuy').textContent=buy;
+  $('mNear').textContent=near;
+}
+function card(it){
+  const e=it.e,pr=it;
+  if(!pr.price) return '<div class="stk far"><div class="top"><span class="name">'+e.name+'</span><span class="code">'+e.sym+'</span><span class="tag">无行情</span></div></div>';
+  const ratio=pr.ratio||0;
+  const cls=it.broke?'hit':(ratio>=0.98?'near':(ratio<0.95?'far':''));
+  const tag=it.broke?'<span class="tag b">已突破</span>':(ratio>=0.98?'<span class="tag" style="color:var(--yellow)">接近突破</span>':'<span class="tag">距'+((1-ratio)*100).toFixed(1)+'%</span>');
+  const pctCls=pr.pct>=0?'up':'down';
+  const bd=e.back_days!=null?(' ｜ 离板 '+e.back_days+' 天'):'';
+  return '<div class="stk '+cls+'">'
+    +'<div class="top"><span class="name">'+e.name+'</span><span class="code">'+e.sym+'</span>'+tag
+    +'<span class="pct '+pctCls+'">'+arrow(pr.pct)+'</span></div>'
+    +'<div class="row"><span>现价 <b>'+pr.price.toFixed(2)+'</b></span><span>量比 <b>'+pr.vr.toFixed(2)+'</b></span>'
+    +(it.broke?'':'<span>离EMA7 <b>'+((1-ratio)*100).toFixed(1)+'%</b></span>')
+    +'<span>EMA7 <b>'+(e.ey||'-')+'</b></span></div>'
+    +'<div class="barw"><div class="bar" style="width:'+Math.min(100,ratio*100).toFixed(1)+'%"></div></div>'
+    +'<div class="lbl">实时价/EMA7 = '+ratio.toFixed(3)+' '+(it.broke?'· 已突破':'· 待突破')+(bd?'':'')+'</div>'
+    +'</div>';
+}
+async function loadPool(){
+  try{
+    const r=await fetch('/pool.json',{cache:'no-store'});
+    const j=await r.json();
+    ENTRIES=j.entries||[];
+    META=j;
+    const lt=j.last_tick?new Date(j.last_tick.at).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}):'—';
+    $('subinfo').textContent='池子快照: '+j.date+' '+j.time+' ｜ 云端引擎最近运行: '+lt+' ｜ 云端状态: '+(j.last_tick?j.last_tick.summary:'—');
+    render();
+    $('lastUpd').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'});
+  }catch(e){$('lastUpd').textContent='加载失败: '+e}
+}
+function tick(){loadPool();loadTencent(ENTRIES.map(e=>e.sym),ok=>{if(ok){parseQuotes();render()}})}
+function startLoop(){if(TIMER)clearInterval(TIMER);TIMER=setInterval(tick,IV)}
+$('iv').onchange=e=>{IV=parseInt(e.target.value);startLoop()};
+tick();startLoop();
+</script>
+</body></html>
