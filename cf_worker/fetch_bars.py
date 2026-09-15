@@ -128,7 +128,7 @@ def main():
                 pass
 
     bars = {c: {"k": k, "name": names.get(c, "")} for c, k in results.items() if len(k) >= 30}
-    last_date = max((k[-1][0] for k in bars.values()), default="")
+    last_date = max((v["k"][-1][0] for v in bars.values()), default="")
     out = {"generated": datetime.now(timezone(timedelta(hours=8))).isoformat(),
            "date": last_date, "bars": bars}
     Path(out_path).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
