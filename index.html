@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>涨停回调候选 · 盘中实时监控 (20260915)</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2333;--border:#2a3142;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--red:#ff4d6d;--green:#3fb950;--yellow:#ffd60a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",sans-serif;padding:20px 14px;line-height:1.6}
+.wrap{max-width:1060px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#3fb950,#58a6ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block}
+.sub{color:var(--muted);font-size:12px;margin-bottom:12px}
+.ctrl{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+.ctrl select,.ctrl button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 10px;font-size:13px}
+.ctrl button{cursor:pointer}.ctrl button:hover{border-color:var(--accent)}
+.stausline{margin-left:auto;color:var(--muted);font-size:12px}
+.blink{animation:bl 1s infinite}@keyframes bl{50%{opacity:.35}}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.metric{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:11px 14px}
+.metric .v{font-size:22px;font-weight:700}.metric .k{font-size:11px;color:var(--muted)}
+.metric.red .v{color:var(--red)}.metric.green .v{color:var(--green)}.metric.blue .v{color:var(--accent)}.metric.yellow .v{color:var(--yellow)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.panel h2{font-size:14px;margin-bottom:10px;padding-left:9px;border-left:4px solid var(--green)}
+.panel.watch h2{border-left-color:var(--yellow)}
+.panel.mid h2{border-left-color:#3fb950}
+.panel.all h2{border-left-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.stk{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px 13px;position:relative}
+.latbtn{display:block;margin-top:9px;background:rgba(163,113,247,.14);border:1px solid rgba(163,113,247,.5);color:#c9a6ff;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;text-align:center}
+.latbtn:hover{background:rgba(163,113,247,.28)}
+.brokebtn{display:block;margin-top:9px;background:rgba(63,185,80,.14);border:1px solid rgba(63,185,80,.45);color:#7ee787;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;text-align:center}
+.brokebtn:hover{background:rgba(63,185,80,.28)}
+.stk.hit{border-color:var(--red);background:linear-gradient(90deg,rgba(255,77,109,.10),transparent)}
+.stk.near{border-color:rgba(255,214,10,.55);background:linear-gradient(90deg,rgba(255,214,10,.07),transparent)}
+.stk.far{opacity:.5;filter:saturate(.55)}
+.top{display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap}
+.name{font-size:15px;font-weight:700}.code{color:var(--muted);font-size:11px}
+.badge{font-size:10px;color:#fff;background:#b8860b;border-radius:9px;padding:1px 7px}
+.tag{font-size:10px;border-radius:9px;padding:1px 7px;border:1px solid var(--border);color:var(--muted)}
+.tag.b{color:var(--green);border-color:rgba(63,185,80,.45)}.tag.v{color:var(--red);border-color:rgba(255,77,109,.45)}
+.pct{margin-left:auto;font-weight:700}.up{color:var(--red)}.down{color:var(--green)}
+.row{display:flex;flex-wrap:wrap;gap:11px;font-size:12px;margin-bottom:5px}
+.row b{font-size:13px}
+.fb{position:absolute;top:-8px;right:10px;background:var(--red);color:#fff;font-size:10px;padding:1px 8px;border-radius:9px;display:none}
+.barw{height:7px;background:#0a0e14;border-radius:5px;overflow:hidden;margin-top:5px}
+.bar{height:100%;background:linear-gradient(90deg,#3fb950,#58a6ff);border-radius:5px}
+.lbl{font-size:10px;color:var(--muted);margin-top:3px}
+.empty{color:var(--muted);text-align:center;padding:26px 0}
+.foot{color:var(--muted);font-size:11px;text-align:center;margin-top:18px;line-height:1.8}
+.progwrap{display:flex;align-items:center;gap:8px}
+.progtrack{flex:1;height:6px;background:#0a0e14;border-radius:4px;overflow:hidden}
+.progfill{height:100%;background:linear-gradient(90deg,#58a6ff,#3fb950)}
+/* ---- 持仓面板 ---- */
+.hold{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.hold h2{font-size:14px;margin-bottom:10px;padding-left:9px;border-left:4px solid var(--red)}
+.holdform{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;font-size:13px}
+.holdform input[type=text]{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 9px;font-size:13px;width:110px}
+.holdform input[type=date]{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 9px;font-size:13px}
+.holdform button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer}
+.holdform button:hover{border-color:var(--accent)}
+.holdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.hk{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:11px 13px;position:relative}
+.hk.alarm{border-color:var(--red);background:linear-gradient(90deg,rgba(255,77,109,.12),transparent)}
+.hk.sell5{border-color:#d29922;background:linear-gradient(90deg,rgba(210,153,34,.12),transparent)}
+.hk .htop{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.hk .hname{font-size:14px;font-weight:700}
+.hk .code{color:var(--muted);font-size:11px}
+.hk .hpct{margin-left:auto;font-weight:700;font-size:12px}
+.hk .btns{display:inline-flex;gap:5px;flex:0 0 auto;margin-left:auto;white-space:nowrap}
+.hk .sellbtn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap}
+.hk .hrow{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin-bottom:4px}
+.hk .hrow b{font-size:12.5px}
+.hk .sellbtn:hover{border-color:var(--red);color:var(--red)}
+.hk .sellbtn.done{color:var(--green);border-color:rgba(63,185,80,.45);cursor:default}
+.hk .sellbtn.done:hover{border-color:rgba(63,185,80,.45);color:var(--green)}
+.alarmmsg{font-size:12px;color:var(--yellow);margin-top:5px;animation:bl 1s infinite}
+.zhint{font-size:11px;color:var(--muted);margin-bottom:8px}
+</style></head><body>
+<div class="wrap">
+<h1>🎯 涨停回调候选 · 盘中实时监控</h1>
+<div class="sub" id="subinfo"></div>
+<div class="ctrl">
+  刷新间隔 <select id="iv">
+    <option value="5000" selected>5秒</option>
+    <option value="10000">10秒</option>
+    <option value="15000">15秒</option>
+    <option value="30000">30秒</option>
+    <option value="60000">1分钟</option>
+    <option value="120000">2分钟</option>
+  </select>
+  <button onclick="tick()">立即刷新</button>
+  <label style="cursor:pointer"><input type="checkbox" id="snd" checked> 突破语音播报</label>
+  <span class="progwrap" style="flex:1;max-width:260px">
+    <span class="stausline" id="progTxt"></span>
+    <div class="progtrack"><div class="progfill" id="progFill"></div></div>
+  </span>
+  <span class="stausline" id="lastUpd">未加载</span>
+</div>
+<div class="panel hold">
+  <h2>📦 我的持仓 · 卖点提醒（A6C v2 规则，含潜伏仓）</h2>
+  <div class="holdform">
+    <input type="text" id="hCode" placeholder="代码 e.g. 600000" maxlength="6">
+    <input type="text" id="hName" placeholder="名称(选填)" maxlength="8">
+    <input type="text" id="hPrice" placeholder="买入价" style="width:80px">
+    <input type="text" id="hDate" placeholder="买入日 YYYY-MM-DD" maxlength="10">
+    <select id="hKind" style="max-width:110px">
+      <option value="break">突破买入</option>
+      <option value="latent">潜伏埋伏</option>
+    </select>
+    <button onclick="addHolding()">＋ 加入持仓</button><button onclick="syncServerHolds()" style="opacity:.85" title="以 持仓.json(服务端) 为准覆盖本地面板">⇩ 同步服务端持仓</button>
+    <button onclick="document.getElementById('holdGrid').innerHTML=''" style="opacity:.7">清空面板</button>
+  </div>
+  <div class="zhbtn">规则：盘中摸 +5% → 卖半仓（点「半仓已卖」）；余仓摸 +10% 必落袋全出、冲 +15% 按更高结算、；<b>次日再摸 +5% 全清</b>；第 6 日收盘清仓；收盘破买入价 -7% 止损。<br>摸+5%后未点「半仓已卖」：现价≥+5%时每1分钟提醒一次卖半仓；回落到+5%以下暂停，再次上穿继续；点「半仓已卖」后当日不再提醒。<br><b style="color:var(--purple, #a371f7)">潜伏埋伏</b>：回调中未触发突破信号就提前小仓买入的票，同样按 A6C-v2 出场盯（+5%卖半 / +10 / +15 / 再摸5全清 / -7%止损 / 6日清），也能在下方观察池点「🐣 潜伏买入」一键加入。</div>
+  <div class="holdgrid" id="hGrid"></div>
+  <div class="empty" id="hEmpty">暂无持仓 —— 买入后把代码/价格填上去，页面自动盯卖点</div>
+</div>
+<div class="metrics">
+  <div class="metric blue"><div class="v" id="mCand">-</div><div class="k">观察池总数</div></div>
+  <div class="metric red"><div class="v" id="mHit">-</div><div class="k">已突破EMA7</div></div>
+  <div class="metric green"><div class="v" id="mBuy">-</div><div class="k">突破且放量（可买入）</div></div>
+  <div class="metric yellow"><div class="v" id="mNear">-</div><div class="k">接近突破(≥98%)</div></div>
+  <div class="metric blue"><div class="v" id="mAll">-</div><div class="k">候选池(10日2板)</div></div>
+</div>
+<div class="panel"><h2>🚨 已突破 EMA7（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="hitGrid"></div></div>
+<div class="panel watch"><h2>👀 未突破 · 观察池（按接近突破程度排序，黄色高亮适合埋伏）</h2><div class="grid" id="watchGrid"></div></div>
+<div class="panel mid"><h2>🚀 已突破EMA7 · 候选池（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="brokeGrid"></div></div>
+<div class="panel all"><h2>📋 候选池 · 10个交易日内有2连板（雷达全量，未筛深度）<span class="allCnt">（<em id="mAllCnt">-</em>只）</span></h2><div class="grid" id="allGrid"></div></div>
+<div class="foot" id="foot"></div>
+</div>
+<script>
+const CANDS = [{"sym": "603270", "name": "金帝股份", "h": 2, "bd": "2026-09-03", "g": 7, "bc": 34.95, "pc": 32.9, "ey": 32.845, "dc": 5.9, "vy": 13314100, "v5": 10400340}, {"sym": "603999", "name": "读者传媒", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 7.29, "pc": 6.41, "ey": 6.398, "dc": 14.8, "vy": 0, "v5": 0}, {"sym": "603626", "name": "科森科技", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 21.69, "pc": 19.95, "ey": 19.674, "dc": 13.9, "vy": 0, "v5": 0}, {"sym": "002980", "name": "华盛昌", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 129.91, "pc": 123.48, "ey": 123.189, "dc": 4.9, "vy": 0, "v5": 0}, {"sym": "000735", "name": "罗 牛 山", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 6.74, "pc": 6.04, "ey": 6.309, "dc": 10.4, "vy": 0, "v5": 0}, {"sym": "603823", "name": "百合花", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 63.84, "pc": 54.87, "ey": 57.759, "dc": 14.1, "vy": 0, "v5": 0}, {"sym": "001366", "name": "播恩集团", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 15.8, "pc": 13.08, "ey": 13.939, "dc": 17.2, "vy": 0, "v5": 0}, {"sym": "000798", "name": "中水渔业", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 11.15, "pc": 10.27, "ey": 10.879, "dc": 7.9, "vy": 0, "v5": 0}, {"sym": "600657", "name": "信达地产", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 3.36, "pc": 2.87, "ey": 3.05, "dc": 14.6, "vy": 0, "v5": 0}, {"sym": "000912", "name": "泸天化", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 5.2, "pc": 4.19, "ey": 4.491, "dc": 19.4, "vy": 0, "v5": 0}, {"sym": "603696", "name": "安记食品", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 16.64, "pc": 13.97, "ey": 15.112, "dc": 16.0, "vy": 0, "v5": 0}, {"sym": "600359", "name": "新农开发", "h": 2, "bd": "2026-09-10", "g": 3, "bc": 9.64, "pc": 8.75, "ey": 8.842, "dc": 9.2, "vy": 0, "v5": 0}, {"sym": "000759", "name": "中百集团", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 7.7, "pc": 7.5, "ey": 7.63, "dc": 2.6, "vy": 0, "v5": 0}, {"sym": "000930", "name": "中粮科技", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 6.41, "pc": 5.29, "ey": 5.749, "dc": 17.5, "vy": 0, "v5": 0}, {"sym": "002295", "name": "精艺股份", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 11.58, "pc": 9.98, "ey": 10.678, "dc": 13.8, "vy": 0, "v5": 0}, {"sym": "000428", "name": "华天酒店", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 5.16, "pc": 4.58, "ey": 4.824, "dc": 11.2, "vy": 0, "v5": 0}, {"sym": "002909", "name": "集泰股份", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 8.72, "pc": 6.74, "ey": 7.597, "dc": 22.7, "vy": 0, "v5": 0}, {"sym": "002059", "name": "云南旅游", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 5.78, "pc": 5.11, "ey": 5.637, "dc": 11.6, "vy": 0, "v5": 0}];
+const ALLPOOL = [{"sym": "002059", "name": "云南旅游", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 5.78, "mc": 5.11, "pc": 5.11, "ey": 5.637, "dc": 11.59, "vy": 125281600, "v5": 117229260, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["gap9", "回调1<2", "dc11.6%"]}, {"sym": "002297", "name": "博云新材", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 22.0, "mc": 20.84, "pc": 22.82, "ey": 21.604, "dc": 5.27, "vy": 148833200, "v5": 96967800, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["gap9", "pc>22.04"]}, {"sym": "002300", "name": "太阳电缆", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 8.39, "mc": 7.93, "pc": 7.93, "ey": 7.92, "dc": 5.48, "vy": 47612600, "v5": 40919540, "back_days": 7, "tomorrow_pass": false, "fail_reasons": ["gap9"]}, {"sym": "600657", "name": "信达地产", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 3.36, "mc": 2.87, "pc": 2.87, "ey": 3.05, "dc": 14.58, "vy": 48507600, "v5": 71545140, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["gap9", "dc14.6%"]}, {"sym": "603270", "name": "金帝股份", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 34.95, "mc": 32.9, "pc": 32.9, "ey": 32.845, "dc": 5.87, "vy": 13314100, "v5": 10400340, "back_days": 7, "tomorrow_pass": false, "fail_reasons": ["gap9"]}, {"sym": "603162", "name": "海通发展", "h": 2, "bd": "2026-09-04", "g": 7, "bc": 14.64, "mc": 13.9, "pc": 13.9, "ey": 14.33, "dc": 5.05, "vy": 96792400, "v5": 74066140, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["gap8"]}, {"sym": "000428", "name": "华天酒店", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 5.16, "mc": 4.58, "pc": 4.58, "ey": 4.824, "dc": 11.24, "vy": 85623800, "v5": 82602240, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc11.2%"]}, {"sym": "000735", "name": "罗 牛 山", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 6.74, "mc": 6.04, "pc": 6.04, "ey": 6.309, "dc": 10.39, "vy": 81652000, "v5": 111175300, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc10.4%"]}, {"sym": "000798", "name": "中水渔业", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 11.15, "mc": 10.27, "pc": 10.27, "ey": 10.879, "dc": 7.89, "vy": 42533300, "v5": 49449640, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["回调1<2"]}, {"sym": "001366", "name": "播恩集团", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 15.8, "mc": 13.08, "pc": 13.08, "ey": 13.939, "dc": null, "vy": 10705400, "v5": 15365920, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["dc17.2%"]}, {"sym": "002564", "name": "天沃科技", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 5.42, "mc": 5.08, "pc": 5.08, "ey": 5.117, "dc": 6.27, "vy": 31734300, "v5": 49914820, "back_days": 3, "tomorrow_pass": true, "fail_reasons": []}, {"sym": "603696", "name": "安记食品", "h": 2, "bd": "2026-09-07", "g": 6, "bc": 16.64, "mc": 13.97, "pc": 13.97, "ey": 15.112, "dc": null, "vy": 17198600, "v5": 25863200, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["dc16.0%"]}, {"sym": "000759", "name": "中百集团", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 7.7, "mc": 7.5, "pc": 7.5, "ey": 7.63, "dc": 2.6, "vy": 238909800, "v5": 179981760, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["回调1<2", "dc2.6%"]}, {"sym": "002172", "name": "澳洋健康", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 5.09, "mc": 4.69, "pc": 5.02, "ey": 4.786, "dc": 7.86, "vy": 241113000, "v5": 184749140, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["pc>4.88"]}, {"sym": "002909", "name": "集泰股份", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 8.72, "mc": 6.74, "pc": 6.74, "ey": 7.597, "dc": null, "vy": 97597600, "v5": 83227020, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc22.7%"]}, {"sym": "002980", "name": "华盛昌", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 129.91, "mc": 123.48, "pc": 123.48, "ey": 123.189, "dc": 4.95, "vy": 10216500, "v5": 8464160, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["回调1<2", "dc4.9%"]}, {"sym": "601595", "name": "上海电影", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 22.69, "mc": 21.7, "pc": 23.36, "ey": 21.596, "dc": 4.36, "vy": 18256200, "v5": 19961760, "back_days": 2, "tomorrow_pass": false, "fail_reasons": ["dc4.4%", "pc>22.03"]}, {"sym": "603626", "name": "科森科技", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 21.69, "mc": 18.67, "pc": 19.95, "ey": 19.674, "dc": 13.92, "vy": 40526800, "v5": 32405840, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["dc13.9%"]}, {"sym": "603679", "name": "华体科技", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 26.15, "mc": 23.82, "pc": 24.97, "ey": 24.34, "dc": 8.91, "vy": 11308500, "v5": 8015860, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc8.9%", "pc>24.83"]}, {"sym": "603823", "name": "百合花", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 63.84, "mc": 54.87, "pc": 54.87, "ey": 57.759, "dc": 14.05, "vy": 14817200, "v5": 13140340, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc14.1%"]}, {"sym": "603999", "name": "读者传媒", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 7.29, "mc": 6.21, "pc": 6.41, "ey": 6.398, "dc": 14.81, "vy": 32551700, "v5": 28446600, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["dc14.8%"]}, {"sym": "000912", "name": "泸天化", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 5.2, "mc": 4.19, "pc": 4.19, "ey": 4.491, "dc": null, "vy": 89337000, "v5": 85329020, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["dc19.4%"]}, {"sym": "000930", "name": "中粮科技", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 6.41, "mc": 5.29, "pc": 5.29, "ey": 5.749, "dc": null, "vy": 151407700, "v5": 122124560, "back_days": 2, "tomorrow_pass": false, "fail_reasons": ["dc17.5%"]}, {"sym": "002295", "name": "精艺股份", "h": 2, "bd": "2026-09-09", "g": 4, "bc": 11.58, "mc": 9.98, "pc": 9.98, "ey": 10.678, "dc": 13.82, "vy": 6298900, "v5": 18687000, "back_days": 2, "tomorrow_pass": false, "fail_reasons": ["dc13.8%"]}, {"sym": "600359", "name": "新农开发", "h": 2, "bd": "2026-09-10", "g": 3, "bc": 9.64, "mc": 8.75, "pc": 8.75, "ey": 8.842, "dc": 9.23, "vy": 24036600, "v5": 37164920, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["gap4", "回调1<2", "dc9.2%"]}, {"sym": "603421", "name": "鼎信通讯", "h": 2, "bd": "2026-09-10", "g": 3, "bc": 7.29, "mc": 6.91, "pc": 7.5, "ey": 6.78, "dc": 5.21, "vy": 90651100, "v5": 36608340, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["gap4", "回调1<2", "pc>6.92"]}, {"sym": "605069", "name": "正和生态", "h": 2, "bd": "2026-09-14", "g": 1, "bc": 12.65, "mc": 12.65, "pc": 12.65, "ey": 11.29, "dc": 0.0, "vy": 4770400, "v5": 3089960, "back_days": 0, "tomorrow_pass": false, "fail_reasons": ["gap2", "回调0<2", "dcNone%", "pc>11.52"]}];
+const BROKE = [{"sym": "002297", "name": "博云新材", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 22.0, "mc": 20.84, "pc": 22.82, "ey": 21.604, "dc": 5.27, "vy": 148833200, "v5": 96967800, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["gap9", "pc>22.04"]}, {"sym": "603270", "name": "金帝股份", "h": 2, "bd": "2026-09-03", "g": 8, "bc": 34.95, "mc": 32.9, "pc": 32.9, "ey": 32.845, "dc": 5.87, "vy": 13314100, "v5": 10400340, "back_days": 7, "tomorrow_pass": false, "fail_reasons": ["gap9"]}, {"sym": "002172", "name": "澳洋健康", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 5.09, "mc": 4.69, "pc": 5.02, "ey": 4.786, "dc": 7.86, "vy": 241113000, "v5": 184749140, "back_days": 3, "tomorrow_pass": false, "fail_reasons": ["pc>4.88"]}, {"sym": "601595", "name": "上海电影", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 22.69, "mc": 21.7, "pc": 23.36, "ey": 21.596, "dc": 4.36, "vy": 18256200, "v5": 19961760, "back_days": 2, "tomorrow_pass": false, "fail_reasons": ["dc4.4%", "pc>22.03"]}, {"sym": "603999", "name": "读者传媒", "h": 2, "bd": "2026-09-08", "g": 5, "bc": 7.29, "mc": 6.21, "pc": 6.41, "ey": 6.398, "dc": 14.81, "vy": 32551700, "v5": 28446600, "back_days": 4, "tomorrow_pass": false, "fail_reasons": ["dc14.8%"]}, {"sym": "603421", "name": "鼎信通讯", "h": 2, "bd": "2026-09-10", "g": 3, "bc": 7.29, "mc": 6.91, "pc": 7.5, "ey": 6.78, "dc": 5.21, "vy": 90651100, "v5": 36608340, "back_days": 1, "tomorrow_pass": false, "fail_reasons": ["gap4", "回调1<2", "pc>6.92"]}];
+const DBDAY = "2026-09-15";
+const BDY = DBDAY.replace(/-/g,'');
+const LS_PREFIX = 'fbjj_';
+const $ = id => document.getElementById(id);
+
+/* ---- 市场前缀(6/9/5=沪, 4/8=北, 其余=深) ---- */
+function mf(c){const a=String(c).charAt(0);return (a==='6'||a==='9'||a==='5')?'sh':(a==='4'||a==='8')?'bj':'sz';}
+
+/* ---- 交易日历/进度 ---- */
+function progress(){
+  const d=new Date(), wd=d.getDay();
+  if(wd===0||wd===6) return 1;
+  const t=d.getHours()*60+d.getMinutes();
+  if(t<568) return 0;
+  if(t<690) return Math.max((t-568)/240, 0.02);
+  if(t<780) return 0.5;
+  if(t<900) return Math.max(0.5+(t-780)/240, 0.52);
+  return 1;
+}
+
+/* ---- 首次突破时间记录（localStorage按天隔离）---- */
+let memFB={};
+try{ Object.keys(localStorage).forEach(k=>{ if(k.indexOf(LS_PREFIX)===0){
+  const dt=k.slice(LS_PREFIX.length, LS_PREFIX.length+8);
+  if(dt!==DBDAY.replace(/-/g,'')) localStorage.removeItem(k);
+}});}catch(e){memFB={}}
+function getFirstBreak(code){
+  const key=LS_PREFIX+DBDAY.replace(/-/g,'')+'_'+code;
+  try{const v=localStorage.getItem(key);if(v)return v;}catch(e){return memFB[code]||null}
+  return memFB[code]||null;
+}
+function setFirstBreak(code){
+  const key=LS_PREFIX+DBDAY.replace(/-/g,'')+'_'+code;
+  if(getFirstBreak(code)) return false;
+  const t=new Date().toTimeString().slice(0,5);
+  memFB[code]=t;
+  try{localStorage.setItem(key,t)}catch(e){}
+  return true;
+}
+
+/* ---- 拉取腾讯行情(JSONP) ---- */
+let lastHits=new Set();
+let brokeLast=new Set();
+let _bInit=false;   /* 顶部严格池: 首帧只初始化集合, 不当作上穿事件播报 */
+let _mInit=false;   /* 中部候选池: 同 */
+/* 人声播报: 优先瑶瑶(Yaoyao), 回退任意中文语音; 无TTS时兜底beep */
+function beep(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type='sine'; o.frequency.value=880;
+    g.gain.setValueAtTime(.001,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.25,ctx.currentTime+.03);
+    g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.45);
+    o.start(); o.stop(ctx.currentTime+.5);
+  }catch(e){}
+}
+let _spkVoice=null;
+function pickVoice(){
+  if(_spkVoice) return _spkVoice;
+  if(!window.speechSynthesis) return null;
+  const vs=window.speechSynthesis.getVoices();
+  const zh=vs.filter(v=>(v.lang||'').toLowerCase().indexOf('zh')===0);
+  const yaoyao=zh.find(v=>/yaoyao/i.test(v.name));
+  _spkVoice=yaoyao||zh[0]||vs[0]||null;
+  return _spkVoice;
+}
+function speak(text,times){
+  if(!$('snd').checked) return;
+  if(!window.speechSynthesis){beep();return;}
+  const n=(times&&times>=1)?times:1;
+  try{
+    window.speechSynthesis.cancel();
+    for(let k=0;k<n;k++){
+      setTimeout(()=>{
+        try{
+          const u=new SpeechSynthesisUtterance(text);
+          u.lang='zh-CN'; u.rate=1.02; u.volume=1;
+          const v=pickVoice(); if(v) u.voice=v;
+          window.speechSynthesis.speak(u);
+        }catch(e){}
+      }, k*2400);
+    }
+  }catch(e){beep();}
+}
+if(window.speechSynthesis) window.speechSynthesis.onvoiceschanged=()=>{_spkVoice=null;};
+
+/* ---- 多源行情加载 (腾讯 -> 东财 -> 新浪 自动降级) ----
+   所有源统一回写 window['v_'+sym] (腾讯 '~' 分隔格式), 下游解析不变 */
+function qset(sym, arr){
+  const a=new Array(40).fill('');
+  a[1]=arr[1]||''; a[2]=arr[2]||''; a[3]=arr[3]||''; a[6]=arr[6]||'';
+  a[32]=arr[32]||''; a[33]=arr[33]||''; a[34]=arr[34]||'';
+  window['v_'+sym]=a.join('~');
+}
+function qsSymOk(codes){ return codes.some(c=>window['v_'+c]); }
+function qsRm(el){ try{ if(el&&el.parentNode) el.parentNode.removeChild(el); }catch(e){} }
+function loadTencent(codes, host, done){
+  const s=document.createElement('script');
+  s.charset='gbk';
+  s.id='qtScr'+Math.floor(Math.random()*1e6);
+  s.src='https://qt.gtimg.cn/q='+codes.join(',')+'&r='+Date.now();
+  s.onload=()=>{ try{ qsRm(s); }catch(e){} done(qsSymOk(codes)); };
+  s.onerror=()=>{ try{ qsRm(s); }catch(e){} done(false); };
+  document.head.appendChild(s);
+}
+function loadEast(codes, host, done){
+  const cb='fbq'+Math.floor(Math.random()*1e6)+Date.now();
+  window[cb]=function(res){
+    const arr=(res&&res.data&&res.data.diff)||[];
+    for(const it of arr){
+      const cd=String(it.f12||'');
+      if(!cd) continue;
+      const a0=cd.charAt(0);
+      const mk=(a0==='6'||a0==='9'||a0==='5')?'sh':(a0==='4'||a0==='8')?'bj':'sz';
+      const hi=it.f15||it.f2, lo=it.f16||it.f2;
+      const q=new Array(40).fill('');
+      q[1]=String(it.f14||''); q[2]=cd; q[3]=String(it.f2||'');
+      q[6]=String(it.f5||'');
+      q[32]=String(it.f3||''); q[33]=String(hi||''); q[34]=String(lo||'');
+      window['v_'+mk+cd]=q.join('~');
+    }
+    try{ delete window[cb]; }catch(e){}
+    done(qsSymOk(codes));
+  };
+  const secs=codes.map(c=>{
+    const m=c.slice(0,2);
+    const pre=(m==='sh')?'1.':(m==='bj'||m==='sz')?'0.':'1.';
+    return pre+c.slice(2);
+  }).join(',');
+  const s=document.createElement('script');
+  s.id='qtEm'+Math.floor(Math.random()*1e6);
+  s.src=host+'/api/qt/ulist.np/get?fltt=2&secids='+secs+'&fields=f12,f14,f2,f3,f5,f15,f16&cb='+cb+'&_='+Date.now();
+  s.onerror=()=>{ try{delete window[cb];}catch(e){} done(false); };
+  document.head.appendChild(s);
+}
+function loadQuotes(codes, success, fail){
+  const srcs=[
+    [loadTencent,''],
+    [loadEast,'https://push2.eastmoney.com'],
+    [loadEast,'https://push2delay.eastmoney.com']
+  ];
+  let i=0;
+  (function next(){
+    if(i>=srcs.length){ if(fail) fail(); return; }
+    const fn=srcs[i][0], host=srcs[i][1]; i++;
+    let settled=false;
+    const timer=setTimeout(()=>{ if(!settled){settled=true; next();} }, 9000);
+    fn(codes, host, ok=>{
+      if(settled) return; settled=true; clearTimeout(timer);
+      if(ok){ if(success) success(); } else { next(); }
+    });
+  })();
+}
+function tick(){
+  const syms=CANDS.map(q=>mf(q.sym)+q.sym).concat(ALLPOOL.map(q=>mf(q.sym)+q.sym)).concat(BROKE.map(q=>mf(q.sym)+q.sym));
+  if(!syms.length){render();return;}
+  /* 失败也 render 一次(显示缓存或骨架), 不让候选池永远空白 */
+  loadQuotes(syms, render, ()=>{ $('lastUpd').textContent='行情请求失败（多源均不可用），稍后重试'; render(); });
+}
+function render(){
+  const p=progress();
+  $('progTxt').textContent='交易进度 '+(p*100).toFixed(0)+'%';
+  $('progFill').style.width=Math.min(p*100,100)+'%';
+  let hitHtml='', watchHtml='', nHit=0, nBuy=0, nNear=0;
+  const items=[];
+  for(const c of CANDS){
+    const sym='v_'+mf(c.sym)+c.sym;
+    const raw=window[sym];
+    if(!raw){continue}
+    const f=raw.split('~');
+    if(f.length<36){continue}
+    const name=f[1]||c.name, price=parseFloat(f[3]);
+    const pct=parseFloat(f[32])||0;
+    const vol=(parseFloat(f[6])||0)*100;
+    const broke=price>c.ey;
+    const ratio=price/c.ey;
+    const pred=vol>0?vol/Math.max(progress(),0.02):0;
+    const vr=c.vy>0?pred/c.vy:0;
+    const volOk=pred>c.vy&&pred>c.v5;
+    let fb=null, isNew=false;
+    if(broke){ isNew=setFirstBreak(c.sym); fb=getFirstBreak(c.sym); }
+    items.push({c:c,sym:c.sym,name,price,pct,ratio,broke,fb,isNew,vr,volOk});
+  }
+  /* 排序: 突破+放量 > 突破未放量 > 接近突破(≥98%) > 其余; 观察池按距EMA近->远 */
+  items.sort((a,b)=>{
+    const ra=a.broke?(a.volOk?0:1):(a.ratio>=.98?2:3);
+    const rb=b.broke?(b.volOk?0:1):(b.ratio>=.98?2:3);
+    if(ra!==rb)return ra-rb;
+    if(ra>=2&&rb>=2)return b.ratio-a.ratio;
+    return b.vr-a.vr;
+  });
+  for(const it of items){
+    const cls=it.broke?'hit':(it.ratio>=.98?'near':(it.ratio<.95?'far':''));
+    const stB=it.broke?'<span class="tag b">突破✅</span>':(it.ratio>=.98?'<span class="tag" style="color:var(--yellow)">接近突破</span>':'<span class="tag">距'+((1-it.ratio)*100).toFixed(1)+'%</span>');
+    const stV=it.volOk?'<span class="tag b">放量✅</span>':'<span class="tag">放量❌</span>';
+    const ztTag=it.pct>=9.5?'<span class="tag v">封板警戒</span>':'';
+    const fbTag=it.fb?'<div class="fb" style="display:block">⚡首次突破 '+it.fb+'</div>':'';
+    let card='<div class="stk '+cls+'">'
+      +fbTag
+      +'<div class="top"><span class="name">'+it.c.name+'</span><span class="code">'+it.sym+'</span><span class="badge">'+it.c.h+'连板</span>'+stB+stV+ztTag+'<span class="pct '+(it.pct>0?'up':'down')+'">'+it.pct.toFixed(2)+'%</span></div>'
+      +'<div class="row"><span>实时 <b class="up">'+it.price.toFixed(2)+'</b></span><span>昨日EMA7 <b>'+it.c.ey.toFixed(3)+'</b></span><span>昨收 <b>'+it.c.pc.toFixed(2)+'</b></span><span>板收 <b>'+it.c.bc.toFixed(2)+'</b></span></div>'
+      +'<div class="row"><span>量比vs昨量 <b>'+it.vr.toFixed(2)+'</b></span><span>距板 <b>'+it.c.g+'日</b></span><span>板日 <b>'+it.c.bd+'</b></span><span>深度 <b>'+(it.c.dc||'-')+'</b></span></div>'
+      +'<div class="row" style="background:rgba(88,166,255,.07);border-radius:8px;padding:4px 8px"><span>+5%半仓 <b class="up">'+(it.c.ey*1.05).toFixed(2)+'</b></span><span>+10% <b class="up">'+(it.c.ey*1.10).toFixed(2)+'</b></span><span>+15% <b class="up">'+(it.c.ey*1.15).toFixed(2)+'</b></span><span>止损-7% <b class="down">'+(it.c.ey*0.93).toFixed(2)+'</b></span></div>'
+      +'<div class="barw"><div class="bar" style="width:'+Math.min(it.ratio*50,100)+'%"></div></div>'
+      +'<div class="lbl">实时价/EMA7 = '+it.ratio.toFixed(3)+' '+(it.broke?'· 已突破':'· 待突破')+'</div>'
+      +'</div>';
+    if(it.broke){nHit++; if(it.volOk)nBuy++; hitHtml+=card.replace(/<\/div>$/, '<button class="brokebtn" onclick="quickBreak(\''+it.sym+'\',\''+(it.c.name||'').replace(/'/g,'')+'\','+it.price.toFixed(2)+')">🎯 突破买入</button></div>');}
+    else{
+      if(it.ratio>=.98)nNear++;
+      /* 潜伏买入按钮: 未突破的票可一键预填表单(改实际买入价后加入持仓) */
+      card=card.replace(/<\/div>$/, '<button class="latbtn" onclick="quickLatent(\''+it.sym+'\',\''+(it.c.name||'').replace(/'/g,'')+'\','+it.price.toFixed(2)+')">🐣 潜伏买入</button></div>');
+      watchHtml+=card;
+    }
+  }
+  const curHits=new Set(items.filter(i=>i.broke).map(i=>i.sym));
+  /* 上穿事件才播报: 上一轮不在上方、本轮现价>EMA7 = 刚上穿(当日可多次);
+     一直>EMA7但未跌破线不播; 本轮缺行情帧的股票继承上一轮状态(防假突破) */
+  for(const c of CANDS){
+    const s0='v_'+mf(c.sym)+c.sym;
+    if(!window[s0] && lastHits.has(c.sym)) curHits.add(c.sym);   /* 缺帧继承 */
+  }
+  if(!_bInit){ _bInit=true; lastHits=curHits; }
+  else{
+    const newHits=items.filter(i=>i.broke&&!lastHits.has(i.sym));
+    newHits.forEach((it,idx)=>{
+      setTimeout(()=>speak(it.c.name+'已突破EMA7日线，可以买入',2), idx*2000);
+    });
+    lastHits=curHits;
+  }
+  $('mCand').textContent=CANDS.length;
+  $('mHit').textContent=nHit;
+  $('mBuy').textContent=nBuy;
+  $('mNear').textContent=nNear;
+  $('hitGrid').innerHTML=hitHtml||'<div class="empty">暂无突破 —— 页面开着会自动盯盘，一旦有股票站上昨日EMA7立即标红+响铃并记录首次突破时间</div>';
+  $('watchGrid').innerHTML=watchHtml||'<div class="empty">无</div>';
+  /* ---- 中部: 候选池内已突破EMA7(语音只提示突破, 不喊买入) ---- */
+  const midHit=new Set();
+  const brokeRow=[];
+  for(const c of BROKE){
+const y='v_'+mf(c.sym)+c.sym, raw=window[y];
+    let name=c.name||'', price=0, pct=0, vr=0, volOk=false;
+    if(raw){
+      const f=raw.split('~');
+      if(f.length>=36){
+        name=f[1]||name; price=parseFloat(f[3])||0; pct=parseFloat(f[32])||0;
+        const vol=(parseFloat(f[6])||0)*100, predV=vol>0?(vol/Math.max(progress(),0.02)):0;
+        vr=c.vy>0?(predV/c.vy):0;
+        volOk=predV>c.vy&&predV>c.v5;
+      }
+    }
+    if(price>0) PX[c.sym]={price:price,pct:pct,vr:vr};           /* 成功 -> 写缓存 */
+    const pcx=PX[c.sym]||{price:0,pct:0,vr:0}, dP=price>0?price:pcx.price, dPct=pct>0?pct:pcx.pct;  /* 展示价: 实时优先,缺失回退缓存 */
+    const cr7=price>0&&price>c.ey&&c.pc<=c.ey;   /* 真上穿判定只用实时价: 昨收≤EMA7 且 现价>EMA7 */
+    if(cr7) midHit.add(c.sym);   /* 上穿事件: 进入本轮集合, 与上轮差集即刚上穿(当日可多次) */
+    const stb=cr7?'<span class="tag b">突破✅</span>':'<span class="tag" style="color:var(--yellow)">未上穿/回踩</span>';
+    const stv=volOk?'<span class="tag b">放量✅</span>':'<span class="tag">放量❌</span>';
+    const zt3=price>0&&pct>=9.5?'<span class="tag v">封板警戒</span>':'';
+    const staleB=price>0?'':'<span class="ld" style="font-size:11px">(缓存)</span>';
+    const staleV=price>0?'':'<span class="ld" style="font-size:11px">(缓存)</span>';
+    brokeRow.push({vr:vr, h1:
+      '<div class="stk '+(cr7?'hit':'near')+'">'
+      +'<div class="top"><span class="name">'+(name||c.sym)+'</span><span class="code">'+c.sym+'</span><span class="badge">'+c.h+'连板</span>'+stb+stv+zt3
+      +'<span class="pct '+(dP>0&&pct>0?(pct>0?'up':'down'):'')+'">'+(pct>0?pct.toFixed(2)+'%':'—')+'</span></div>'
+      +'<div class="row"><span>现价 <b class="up">'+(dP>0?dP.toFixed(2):'…')+'</b>'+staleB+'</span><span>EMA7 <b>'+c.ey.toFixed(3)+'</b></span><span>昨收 <b>'+c.pc.toFixed(2)+'</b></span><span>板收 <b>'+c.bc.toFixed(2)+'</b></span></div>'
+      +'<div class="row"><span>量比 <b>'+(dP>0&&pcx.vr>0?pcx.vr.toFixed(2):(vr>0?vr.toFixed(2):'…'))+'</b>'+staleV+'</span><span>距板 <b>'+c.g+'日</b></span><span>板日 <b>'+c.bd+'</b></span></div>'
+      +'<div class="lbl">候选池内突破EMA7 · 仅提示不构成买入建议</div>'
+      +'<button class="brokebtn" onclick="quickBreak(\''+c.sym+'\',\''+(name||c.sym).replace(/'/g,'')+'\','+dP.toFixed(2)+')">🎯 突破买入</button>'
+      +'</div>'});
+  }
+  brokeRow.sort((a,b)=>b.vr-a.vr||a.h1.length-b.h1.length);
+  $('brokeGrid').innerHTML=brokeRow.map(r=>r.h1).join('')||'<div class="empty">候选池内暂无已突破EMA7 —— 突破即上这块并语音提示（不喊买入）</div>';
+  if(!_mInit){ _mInit=true; brokeLast=new Set(midHit); }
+  else if(brokeLast.size>0){
+    [...midHit].filter(x=>!brokeLast.has(x)&&!CANDS.some(q=>q.sym===x)).forEach((x,i)=>{
+      const cc=BROKE.find(b=>b.sym===x);
+      if(cc) setTimeout(()=>speak((cc.name||cc.sym)+'已突破EMA7日线',2), i*2000);
+    });
+  }
+  for(const b of BROKE){ const s2='v_'+mf(b.sym)+b.sym; if(!window[s2] && brokeLast.has(b.sym)) midHit.add(b.sym); }
+  brokeLast=midHit;
+  /* ---- 底部候选池: 10日内2连板雷达 ---- */
+  $('mAll').textContent=ALLPOOL.length; var _ac=$('mAllCnt'); if(_ac){_ac.textContent=ALLPOOL.length;}
+  const allRow=[];
+  for(const c of ALLPOOL){
+const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
+    let name=c.name||'', price=0, pct=0, vr=0;
+    if(raw){
+      const f=raw.split('~');
+      if(f.length>=36){
+        price=parseFloat(f[3])||0; pct=parseFloat(f[32])||0;
+        const vol=(parseFloat(f[6])||0)*100, pred=vol>0?(vol/Math.max(progress(),0.02)):0;
+        vr=c.vy>0?(pred/c.vy):0;
+        name=f[1]||name; PX[c.sym]={price:price,pct:pct,vr:vr};   /* 成功 -> 写缓存 */
+      }
+    }
+    const pcx=PX[c.sym]||{price:0,pct:0,vr:0}, dP=price>0?price:pcx.price, dVr=vr>0?vr:pcx.vr;
+    const vsBc=dP>0&&c.bc>0?(dP/c.bc-1)*100:null;
+    const ztT=price>0&&pct>=9.5?'<span class="tag v">封板警戒</span>':'';
+    const dcT=(c.dc===null||c.dc===undefined)
+      ?'<span class="tag">深—</span>'
+      :(c.dc>=5&&c.dc<=8?'<span class="tag b">深度'+c.dc.toFixed(1)+'%✓</span>':'<span class="tag">深'+c.dc.toFixed(1)+'%</span>');
+    const nearCls=(vsBc!==null&&vsBc<=0&&vsBc>=-9)?' near':'';
+    const staleA=price>0?'':'<span class="ld" style="font-size:11px">(缓存)</span>';
+    allRow.push({g:c.g, h:'<div class="stk'+nearCls+'">'
+      +'<div class="top"><span class="name">'+(name||c.sym)+'</span><span class="code">'+c.sym+'</span><span class="badge">'+c.h+'连板</span>'+ztT+dcT
+      +'<span class="pct '+(pct>0?'up':'down')+'">'+(pct>0?pct.toFixed(2)+'%':'—')+'</span></div>'
+      +'<div class="row"><span>现价 <b class="up">'+(dP>0?dP.toFixed(2):'…')+'</b>'+staleA+'</span><span>昨收 <b>'+c.pc.toFixed(2)+'</b></span><span>板收 <b>'+c.bc.toFixed(2)+'</b></span><span>距板 <b>'+c.g+'日</b></span></div>'
+      +'<div class="row"><span>vs板收 <b>'+(vsBc!==null?vsBc.toFixed(1)+'%':'…')+'</b></span><span>板日 <b>'+c.bd+'</b></span><span>量比 <b>'+(dVr>0?dVr.toFixed(2):'…')+'</b></span><span>回调 <b>'+(c.back_days||'—')+'</b>日</span></div>'
+      +(c.tomorrow_pass?'<div style="padding:6px 8px 2px;color:var(--grn);font-size:12px">★ 明日进入观察池(gap='+c.g+'→'+(c.g+1)+',深度'+(c.dc||0).toFixed(1)+'%,回调'+(c.back_days||0)+'日)</div>':'<div style="padding:6px 8px 2px;color:var(--muted);font-size:11px">卡点: '+(c.fail_reasons&&c.fail_reasons.join(', ')||'—')+'</div>')
+      +'<button class="latbtn" onclick="quickLatent(\''+c.sym+'\',\''+(name||c.sym).replace(/'/g,'')+'\','+dP.toFixed(2)+')">🐣 潜伏买入</button>'
+      +'</div>'});
+  }
+  allRow.sort((a,b)=>b.g-a.g);
+  $('allGrid').innerHTML=allRow.map(r=>r.h).join('')||'<div class="empty">最近10个交易日内无 2 连板股</div>';
+  const d=new Date();
+  $('lastUpd').innerHTML='<span class="'+(d.getSeconds()%2?'blink':'')+'">'+d.toTimeString().slice(0,8)+' 更新</span>';
+  if(nBuy>0){document.title='('+nBuy+'只可买) 涨停回调实时监控';}
+  else if(nHit>0){document.title='('+nHit+'只突破) 涨停回调实时监控';}
+  else{document.title='涨停回调 · 盘中实时监控';}
+}
+$('subinfo').textContent='数据库最新交易日 2026-09-15 · 定稿A6C口径：主板2连板 → 回调≥2日(收盘破板收98%) → 深度5~8% → gap∈{3,5,6,7}(剔4) → 昨收≤昨日EMA7(+2%容差) · 盘中判定：实时价>EMA7 且 预估全天量>昨量且>5日均量 → 放量✅可买入优先 · 卖出(A6C-v2)：+5%卖半仓 → 余仓15>10更高结算、再次摸5%全清 → 6日收盘清仓 · 收盘破-7%止损 · 观察池按接近突破程度自动排序 · 底部候选池=10个交易日内恰2连板的主板(雷达,未筛选)';
+$('foot').innerHTML='页面保持打开即自动盯盘（行情每 '
+  + ($('iv')?($('iv').value/1000):60)
+  + ' 秒刷新，腾讯源延时约1-3秒；每1分钟整页重载以更新候选池）<br>首次突破时间为本机浏览器记录（localStorage），换设备或清缓存会丢失 · 数据仅供参考，不构成投资建议';
+
+/* ============ 我的持仓 · 卖点提醒 (A6C v2) ============ */
+const LS_HOLDS = 'fbjj_holdlist';
+const LS_ALMS = 'fbjj_alarmlog';
+const LS_ALMD = 'fbjj_alarmday';
+const LS_REMOVED = 'fbjj_removed';   /* 用户已移除的 code: 刷新后 SEED 不再加回 */
+/* 已移除标记集(跨刷新): 移除/半仓全清 时记录, loadHold 合并 SEED 时排除 */
+function readRemoved(){
+  try{ const r=JSON.parse(localStorage.getItem(LS_REMOVED)||'[]'); return Array.isArray(r)?r:[]; }catch(e){ return []; }
+}
+function markRemoved(code){
+  try{ const r=readRemoved(); if(r.indexOf(code)<0){ r.push(code); localStorage.setItem(LS_REMOVED, JSON.stringify(r)); } }catch(e){}
+}
+function unmarkRemoved(code){
+  try{ const r=readRemoved().filter(c=>c!==code); localStorage.setItem(LS_REMOVED, JSON.stringify(r)); }catch(e){}
+}
+/* 服务端持仓(持仓.json)种子: 首次打开自动导入, 之后以 localStorage 为准 */
+const SEEDHOLDS = [];
+let HOLDINGS = [];
+const PX = {};      /* 候选池行情缓存: sym -> {price,pct,vr}; 行情缺失时显示缓存价,不闪'…' */
+const HASH_Q = {};   /* 持仓现价缓存: code -> {q:{price,hi,lo,pct}, ts:'HH:MM'}; 行情缺失时继续显示缓存价,不闪'…' */
+(function(){
+function loadHold(){
+    let local=[];
+    try{
+      const r=localStorage.getItem(LS_HOLDS);
+      if(r){ const a=JSON.parse(r); if(Array.isArray(a)) local=a; }
+    }catch(e){}
+    if(!local.length){
+      try{
+        const w=window.name||'';
+        if(w.indexOf('fbjjh:')===0){
+          const o=JSON.parse(w.slice(6));
+          if(o&&Array.isArray(o.hs)&&o.hs.length) local=o.hs;
+        }
+      }catch(e){}
+    }
+    /* 服务端持仓(持仓.json)为权威底表: 服务端有的票一定在(含 halfDone 状态),
+       但已标记移除(code in LS_REMOVED)的票不再加回; 本地多出的票(页面手动添加)保留 */
+    const removedSet={}; readRemoved().forEach(c=>{ removedSet[String(c)]=1; });
+    if(SEEDHOLDS&&SEEDHOLDS.length){
+      const seedBy={}; SEEDHOLDS.forEach(s=>{ if(s&&s.code) seedBy[String(s.code)]=s; });
+      const merged=SEEDHOLDS.filter(s=>!(s&&s.code&&removedSet[String(s.code)])).map(s=>{
+        const l=local.find(h=>h&&String(h.code)===String(s.code));
+        if(l){ if(l.p5!==undefined) s.p5=l.p5; if(l.p5Day!==undefined) s.p5Day=l.p5Day; }
+        return s;
+      });
+      local.forEach(h=>{ if(h&&h.code&&!seedBy[String(h.code)]) merged.push(h); });
+      HOLDINGS=merged;
+    } else { HOLDINGS=local; }
+    saveHold();
+  }
+  function syncServerHolds(){
+    if(!SEEDHOLDS||!SEEDHOLDS.length){ alert('页面无服务端持仓数据(SEEDHOLDS)'); return; }
+    const removedSet={}; readRemoved().forEach(c=>{ removedSet[String(c)]=1; });
+    HOLDINGS=SEEDHOLDS.filter(s=>!(s&&s.code&&removedSet[String(s.code)])).slice(); saveHold(); renderHold();
+    alert('已同步服务端持仓 '+HOLDINGS.length+' 只');
+  }
+  window.syncServerHolds=syncServerHolds;
+  loadHold();
+})();
+function saveHold(){
+    try{ localStorage.setItem(LS_HOLDS, JSON.stringify(HOLDINGS)); }catch(e){}
+    try{ window.name='fbjjh:'+JSON.stringify({hs:HOLDINGS, t:Date.now()}); }catch(e){}
+    syncHoldServer();
+  }
+/* 页面持仓变更(半仓已卖/移除/加入/改价) → 同步到服务端 持仓.json(hold_sync_server.py)
+   通过本地轻服务 POST, 失败静默(仅影响微信推送链路, 不影响本页盯盘) */
+function syncHoldServer(){
+  try{
+    const body=JSON.stringify({holds:HOLDINGS.map(h=>({code:h.code,name:h.name,buy:h.buy,buyDate:h.buyDate,kind:h.kind,halfDone:!!h.halfDone,halfDate:h.halfDate||'',halfAt:h.halfAt||'',shares:h.shares||0}))});
+    fetch('http://127.0.0.1:8765/api/hold',{method:'POST',headers:{'Content-Type':'application/json'},body}).catch(()=>{});
+  }catch(e){}
+}
+/* 按数据日(BDY)重置当日首次触达的5, 防跨日/跨周五误判“首次” */
+HOLDINGS.forEach(h=>{ if(h.p5Day!==BDY){ h.p5=null; h.p5Day=BDY; } });
+if(HOLDINGS.length) saveHold();
+function addHolding(){
+  const code=(document.getElementById('hCode').value||'').trim().replace(/\D/g,'');
+  const name=(document.getElementById('hName').value||'').trim()||code;
+  const price=parseFloat(document.getElementById('hPrice').value);
+  const buyDate=document.getElementById('hDate').value.trim()||new Date().toISOString().slice(0,10);
+  const kind=document.getElementById('hKind').value||'break';
+  if(!/^\d{6}$/.test(code)||!(price>0)){ alert('请填写6位代码 + 买入价'); return; }
+  if(HOLDINGS.some(h=>h.code===code)){ alert('该代码已在持仓'); return; }
+  unmarkRemoved(code);
+  HOLDINGS.push({code,name,buy:price,buyDate,kind,halfDone:false,res5:false});
+  saveHold(); renderHold();
+  ['hCode','hName','hPrice','hDate'].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});
+  speak((name||code)+' 已加入持仓',2);
+}
+function quickLatent(code,name,price){
+  /* 观察池一键埋伏: 把当前价填入表单, 用户改实际买入价后点加入 */
+  document.getElementById('hCode').value=code;
+  document.getElementById('hName').value=name||code;
+  document.getElementById('hPrice').value=price||'';
+  document.getElementById('hKind').value='latent';
+  document.getElementById('hDate').value=new Date().toISOString().slice(0,10);
+  const el=document.getElementById('hPrice'); if(el){ el.focus(); el.select(); }
+  speak((name||code)+' 待确认潜伏价位',2);
+}
+function quickBreak(code,name,price){
+  /* 已突破候选池一键埋伏: 跟潜伏买入同款表单, 但默认"突破买入"类型 */
+  document.getElementById('hCode').value=code;
+  document.getElementById('hName').value=name||code;
+  document.getElementById('hPrice').value=price||'';
+  document.getElementById('hKind').value='breakthrough';
+  document.getElementById('hDate').value=new Date().toISOString().slice(0,10);
+  const el=document.getElementById('hPrice'); if(el){ el.focus(); el.select(); }
+  speak((name||code)+' 待确认突破价位',2);
+}
+function markHalf(code){
+  const h=HOLDINGS.find(x=>x.code===code); if(!h) return;
+  h.halfDone=true; h.halfAt=new Date().toTimeString().slice(0,5); h.halfDate=DBDAY.replace(/-/g,''); h.res5=false;
+  saveHold(); renderHold();
+  speak((h.name||h.code)+' 半仓已卖出，剩余半仓继续盯盘',2);
+}
+function removeHolding(code){
+  markRemoved(code);           /* 记录移除标记: 刷新后 SEED 不加回 */
+  HOLDINGS=HOLDINGS.filter(x=>x.code!==code); saveHold(); renderHold();
+  speak((HOLDINGS.some(x=>x.code===code)?'':'已移除 ')+code,2);
+}
+/* ============ 防重复播报: 内存 / window.name(同标签跨刷新) / localStorage 三层 ============ */
+const MEM_ALM = new Set();   /* 本页会话已播过(即使 storage 被禁也不重播) */
+const MEM_X5  = new Set();   /* 本页会话已提示过 +5% */
+const LAST_SPK = {};         /* 播报节流: 同 key 30 秒内不再发声 */
+const LAST_P5R = {};         /* 未点「半仓已卖」: 当日再触+5% 持续提醒(60秒一轮) */
+const W5PFX = 'fbjj5:';      /* window.name 前缀(同标签页刷新不丢) */
+function winX5(){
+  try{ const n=window.name||''; if(n.indexOf(W5PFX)!==0) return {}; const o=JSON.parse(n.slice(W5PFX.length)); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; }
+}
+function alarmDone(code,type){
+  const k=code+'|'+type+'|'+DBDAY;
+  if(MEM_ALM.has(k)) return true;
+  try{ const a=JSON.parse(localStorage.getItem(LS_ALMD)||'[]'); return a.indexOf(k)>=0; }catch(e){ return false; }
+}
+function alarmMark(code,type){
+  const k=code+'|'+type+'|'+DBDAY;
+  MEM_ALM.add(k);
+  try{ const a=JSON.parse(localStorage.getItem(LS_ALMD)||'[]'); a.push(k); localStorage.setItem(LS_ALMD, JSON.stringify(a.slice(-600))); }catch(e){}
+}
+const LS_CROSS5 = 'fbjj_cross5';
+/* 当日是否已提示过 +5%(跨刷新持久): 内存 > window.name > localStorage */
+function cross5Map(){ try{ const r=JSON.parse(localStorage.getItem(LS_CROSS5)||'{}'); return (r && typeof r==='object') ? r : {}; }catch(e){ return {}; } }
+function crossed5Today(code){
+  if(MEM_X5.has(code)) return true;
+  const w=winX5();
+  if(w[code]===BDY) return true;
+  return cross5Map()[code]===BDY;
+}
+function markCross5(code){
+  MEM_X5.add(code);
+  try{ const m=cross5Map(); m[code]=BDY; localStorage.setItem(LS_CROSS5, JSON.stringify(m)); }catch(e){}
+  try{ const m=winX5(); m[code]=BDY; window.name=W5PFX+JSON.stringify(m); }catch(e){}
+}
+function fireAlarm(code,name,msg,spk){
+  if(alarmDone(code,msg)) return;
+  alarmMark(code,msg);
+  const nk=code+'|'+msg;
+  if(!LAST_SPK[nk] || Date.now()-LAST_SPK[nk]>30000){
+    LAST_SPK[nk]=Date.now();
+    speak(name+'：'+(spk||msg),1);
+  }
+  const card=document.querySelector('.hk[data-code="'+code+'"]');
+  if(card){
+    card.classList.add('alarm');
+    if(!card.querySelector('.alarmmsg')){
+      const d=document.createElement('div'); d.className='alarmmsg';
+      d.textContent='🚨 '+msg; card.appendChild(d);
+    }
+  }
+}
+function pctLine(price,buy){ const p=(price/buy-1)*100; return '<b>'+(p>0?'+':'')+p.toFixed(2)+'%</b>'; }
+function holdDays(bd){
+  /* 买入日算第1个交易日, 周一~周五计数(服务端有真实日历后可用下发值); 非法返回null */
+  try{
+    const b=new Date(String(bd).replace(/-/g,'/')); if(isNaN(b.getTime())) return null;
+    const t=new Date(); let n=0, c=new Date(b);
+    while(c<=t){ const w=c.getDay(); if(w!==0&&w!==6) n++; c.setDate(c.getDate()+1); }
+    return n;
+  }catch(e){ return null; }
+}
+function holdCardHTML(h, q, isStale){
+  /* q: {name, price, hi, lo, pct} 或 null(行情未到); isStale=true 表示 q 来自缓存(只显示价格, 不做卖点判定) */
+  const buy=h.buy, hal=buy*1.05, tp10=buy*1.10, tp15=buy*1.15, stop=buy*0.93;
+  const dimN=holdDays(h.buyDate);
+  const nm=q?q.name:(h.name||h.code);
+  const price=q?q.price:null;
+  const hi=q?q.hi:null, lo=q?q.lo:null;
+  const pct=q?q.pct:null;
+  let cls='', alarm=null, spk='';
+  if(q && !isStale && inTradingNow()){
+    const dNow=new Date(); const mn=dNow.getHours()*60+dNow.getMinutes();
+    const tail = mn>=890&&mn<=894 ? 1 : (mn>=895&&mn<=898 ? 2 : 0);
+    let t6msg='', t6spk='';
+    if(dimN!==null){
+      if(dimN>=6 && tail>=2){ t6msg='🕒 T+6 第'+dimN+'日，收盘清仓（最后机会）！'; t6spk='第六日收盘清仓'; }
+      else if(dimN>=6 && tail===1){ t6msg='🕒14:50 T+6 第'+dimN+'日，收盘清仓最后确认！'; t6spk='第六日收盘清仓'; }
+      else if(dimN===5 && tail===2){ t6msg='🕒 明日为第6个交易日，收盘清仓（今日可提前挂单）'; t6spk='明日第六日清仓'; }
+    }
+    const stopHit = price!=null && price<=stop;
+    const dN=new Date();
+    const today=dN.getFullYear()+''+String(dN.getMonth()+1).padStart(2,'0')+''+String(dN.getDate()).padStart(2,'0');
+    const notToday=((h.halfDate||'')+'').replace(/-/g,'')!==today;
+    if(!h.halfDone){
+      /* 未半仓=全仓风险: 止损最优先, 再+5%半仓提醒, 再T+6 */
+      if(stopHit && tail===2){ alarm='🕒14:55 尾盘确认：跌破 -7% 止损，全部清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
+      else if(stopHit && tail===1){ alarm='🕒14:50 尾盘确认：跌破 -7%，准备清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
+      else if(stopHit && mn<890){ /* 2026-09-02 用户拍板: 盘中触及 -7% 不再提醒(防洗盘错杀), 仅 14:50/14:55 尾盘两次确认 */ }
+      else if(hi>=hal){
+        const firstCross = !h.p5 || h.p5<hal;
+        if(firstCross && !crossed5Today(h.code)){
+          /* 当日首次触及+5% → 提醒一次(以当日最高为准) */
+          markCross5(h.code);
+          alarm='摸到 +5% 啦，卖出半仓锁利（现价≥+5%时每1分钟提醒一次，回落暂停、再上穿恢复）！'; spk='摸到+5%，卖出半仓'; cls='sell5';
+        }else if(price!=null && price>=hal){
+          /* 未点「半仓已卖」: 现价≥+5% -> 每60秒提醒一次; 现价回落到+5%以下离场, 再上穿恢复 */
+          markCross5(h.code);
+          const p5k='p5r|'+h.code, n5=Date.now();
+          if(!LAST_P5R[p5k] || n5-LAST_P5R[p5k]>60000){
+            LAST_P5R[p5k]=n5;
+            alarm='现价仍在 +5% 上方，请卖出半仓锁利！'; spk='现价在上方，请卖半仓'; cls='sell5';
+          }
+        }
+        /* 现价回落到+5%下方: 本轮静默, 等价格再次上穿 */
+      }
+      else if(t6msg){ alarm=t6msg; spk=t6spk; cls='alarm'; }
+      if(h.p5!==hi){ h.p5=hi; saveHold(); }
+    } else {
+      /* 已半仓: 挂单成交优先(15>10>2nd5), 止损只兜「档位都没摸到」, T+6最后 */
+      if(hi>=tp15){ alarm='冲到 +15% 最高，剩余半仓全出！'; spk='冲到15%，全出'; cls='alarm'; }
+      else if(hi>=tp10){ alarm='摸到 +10% 必落袋，剩余半仓全出！'; spk='摸到10%，全出'; cls='alarm'; }
+      else if(hi>=hal && notToday){ alarm='再次摸 +5%（次日确认），剩余半仓全清锁利！'; spk='再次摸5%，全清锁定'; cls='sell5'; }
+      else if(stopHit && tail===2){ alarm='🕒14:55 尾盘确认：档位未摸到且破 -7%，止损清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
+      else if(stopHit && tail===1){ alarm='🕒14:50 尾盘确认：档位未摸到且破 -7%，准备清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
+      else if(stopHit && mn<890){ /* 2026-09-02 用户拍板: 盘中止损静默, 仅尾盘确认 */ }
+      else if(t6msg){ alarm=t6msg; spk=t6spk; cls='alarm'; }
+    }
+    if(alarm) fireAlarm(h.code, nm, alarm, spk);
+  }
+  const staleTag = isStale && price!=null ? '<span class="ld" style="font-size:11px">(缓存'+(HASH_Q[h.code]?HASH_Q[h.code].ts:'')+')</span>' : '';
+  const priceTxt = price!=null ? price.toFixed(2)+staleTag : '<span class="ld">…</span>';
+  const hiTxt = hi!=null ? hi.toFixed(2) : '…';
+  const loTxt = lo!=null ? lo.toFixed(2) : '…';
+  const pctTxt = pct!=null ? pct.toFixed(2)+'%' : '…';
+  const pctCls = pct!=null ? (pct>0?'up':'down') : '';
+  const dayTag = dimN!==null ? '<span class="tag" style="color:var(--yellow)">持仓第'+dimN+'/6日</span>' : '';
+  const statusBadge = h.halfDone
+    ? '<span class="tag b">半仓已卖 ✓</span>'
+    : '<span class="tag" style="color:var(--yellow)">待半仓</span>';
+  const kindBadge = (h.kind==='latent')
+    ? '<span class="tag b" style="color:var(--purple,#a371f7);border-color:var(--purple,#a371f7)">潜伏</span>'
+    : '';
+  return '<div class="hk '+cls+'" data-code="'+h.code+'">'
+    +'<div class="htop"><span class="hname">'+nm+'</span><span class="code">'+h.code+'</span>'+kindBadge+statusBadge+dayTag
+    +'<span class="hpct '+pctCls+'">'+pctTxt+'</span>'
+    +'<span class="btns">'+(h.halfDone
+      ? '<button class="sellbtn done" onclick="markHalf(\''+h.code+'\')">✓ 半仓已卖('+(h.halfAt||'')+')</button>'
+      : '<button class="sellbtn" onclick="markHalf(\''+h.code+'\')">半仓已卖</button>')
+    +'<button class="sellbtn" onclick="removeHolding(\''+h.code+'\')">移除</button></span></div>'
+    +'<div class="hrow"><span>现价 <b>'+priceTxt+'</b></span><span>买入 <b>'+buy.toFixed(2)+'</b></span><span>'+(price!=null?pctLine(price,buy):'…')+'</span></div>'
+    +'<div class="hrow" style="background:rgba(88,166,255,.07);border-radius:8px;padding:4px 8px">'
+    +'<span>+5%半仓 <b class="up">'+hal.toFixed(2)+'</b></span>'
+    +'<span>+10% <b class="up">'+tp10.toFixed(2)+'</b></span>'
+    +'<span>+15% <b class="up">'+tp15.toFixed(2)+'</b></span>'
+    +'<span>止损 <b class="down">'+stop.toFixed(2)+'</b></span></div>'
+    +'<div class="lbl">今日最高 <b class="up">'+hiTxt+'</b> · 最低 <b class="down">'+loTxt+'</b>'
+    +(h.halfDone?' · 剩半仓(盯10/15/次日5/6日)':' · 待卖半仓')+'</div>'
+    +'</div>';
+}
+function inTradingNow(){
+  const d=new Date(), wd=d.getDay();
+  if(wd===0||wd===6) return false;
+  const mn=d.getHours()*60+d.getMinutes();
+  return (mn>=570&&mn<690)||(mn>=780&&mn<=900);
+}
+function renderHold(){
+  const g=document.getElementById('hGrid'), e=document.getElementById('hEmpty');
+  if(!g) return;
+  e.style.display=HOLDINGS.length?'none':'';
+  if(!HOLDINGS.length){ g.innerHTML=''; return; }
+  /* 先立即渲染骨架: 有缓存价就用缓存价(带'缓存'角标), 无缓存时才显示 … */
+  g.innerHTML=HOLDINGS.map(h=>holdCardHTML(h, HASH_Q[h.code]?HASH_Q[h.code].q:null, !!HASH_Q[h.code])).join('');
+  const syms=HOLDINGS.map(h=>mf(h.code)+h.code);
+  loadQuotes(syms, ()=>{
+    for(const h of HOLDINGS){
+      const sym='v_'+mf(h.code)+h.code, raw=window[sym]; if(!raw) continue;
+      const f=raw.split('~'); if(f.length<36) continue;
+      const q={ name:f[1]||h.name, price:parseFloat(f[3]), hi:parseFloat(f[33])||parseFloat(f[3]), lo:parseFloat(f[34])||parseFloat(f[3]), pct:parseFloat(f[32])||0 };
+      HASH_Q[h.code]={q:q, ts:new Date().toTimeString().slice(0,8)};   /* 更新缓存 */
+      const card=document.querySelector('.hk[data-code="'+h.code+'"]');
+      if(card){
+        const tmp=document.createElement('div'); tmp.innerHTML=holdCardHTML(h,q);
+        card.parentNode.replaceChild(tmp.firstChild, card);
+      }
+    }
+  }, ()=>{});
+}
+function restartTimer(){
+  if(window.__timer)clearInterval(window.__timer);
+  window.__timer=setInterval(tick, parseInt($('iv').value));
+}
+$('iv').onchange=restartTimer;
+tick(); restartTimer();
+renderHold();
+setInterval(renderHold, 10000);   /* 持仓行情独立轮询(10秒兜底) */
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){tick();renderHold();}});
+window.addEventListener('storage',e=>{ if(e.key!==LS_HOLDS) return; try{ HOLDINGS=JSON.parse(e.newValue||'[]'); if(!Array.isArray(HOLDINGS)) HOLDINGS=[]; renderHold(); }catch(err){} });
+</script>
+</body></html>
