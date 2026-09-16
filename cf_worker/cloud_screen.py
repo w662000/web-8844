@@ -208,16 +208,16 @@ def update():
                         "name": f[1], "date": f[30][:8].replace("/", "-"),
                         "open": float(f[5] or 0), "close": float(f[3] or 0),
                         "high": float(f[33] or 0), "low": float(f[34] or 0),
-                        "vol": float(f[36] or 0),
+                        "vol": float(f[36] or 0) * 100,  # 腾讯 f[36] 单位为"手"(100股), DB/bars 统一用"股"
                     }
         except Exception as e:
             print("  batch err:", str(e)[:80])
         time.sleep(0.1)
     print(f"当日行情: {len(today_quotes)}/{len(codes)} 用时 {time.time()-t0:.0f}s")
 
-    # 3. 追加/替换当日K线
+    # 3. 追加/替换当日K线 (含尾部同日去重: 防历史污染数据残留)
     today_cn = cn_now().strftime("%Y-%m-%d")
-    added, replaced, skipped_susp, skipped_old = 0, 0, 0, 0
+    added, replaced, skipped_susp, skipped_old, deduped = 0, 0, 0, 0, 0
     for c in codes:
         tq = today_quotes.get(c)
         if not tq:
@@ -229,19 +229,25 @@ def update():
             continue
         k = bars[c]["k"]
         klast = k[-1][0].replace("-", "") if k and k[-1][0] else ""
-        if klast >= bd8:
+        if klast == bd8:
             # 同一交易日: 替换(顺带把日期格式统一为带横线)
             k[-1] = [bdate, tq["open"], tq["close"], tq["high"], tq["low"], tq["vol"]]
             replaced += 1
-        else:
+        elif klast < bd8:
             k.append([bdate, tq["open"], tq["close"], tq["high"], tq["low"], tq["vol"]])
             if len(k) > 60:
                 bars[c]["k"] = k[-60:]
             added += 1
+        else:
+            # 行情日期早于已有最后一行(旧数据): 保留现有数据
+            skipped_old += 1
+        while len(k) > 1 and k[-1][0] == k[-2][0]:
+            del k[-2]
+            deduped += 1
         nm = tq.get("name", "")
         if nm:
             bars[c]["name"] = nm
-    print(f"K线追加 {added} / 替换 {replaced} / 停牌跳过 {skipped_susp} / 旧日期跳过 {skipped_old}")
+    print(f"K线追加 {added} / 替换 {replaced} / 停牌跳过 {skipped_susp} / 旧日期跳过 {skipped_old} / 去重 {deduped}")
 
     # 4. 筛选
     entries = []
@@ -261,12 +267,102 @@ def update():
     bars_out = {"generated": cn_now().isoformat(), "date": last_date, "bars": bars}
     print(f"POOL_OK date={pool['date']} entries={len(entries)}")
 
+    # 4.5 上传前本地验证 (数据不过关不上传)
+    print("VALIDATION:")
+    vok, vrep = validate_bars(bars_out)
+    for line in vrep:
+        print("  " + line)
+    if not vok:
+        print("VALIDATE_FAIL: 数据未通过校验, 中止上传 (bars/pool 均未推送)")
+        sys.exit(2)
+
     # 5. 推回云端
     out = Path(__file__).parent / "pool_cloud.json"
     out.write_text(json.dumps(pool, ensure_ascii=False), encoding="utf-8")
     r1 = worker_post(wurl + "/bars.json", bars_out, atok)
     r2 = worker_post(wurl + "/pool", pool, atok)
     print("WORKER_SYNC bars:", r1[:80], "| pool:", r2[:80])
+
+
+def validate_bars(bars, sample_n=30, cross_check=True):
+    """上传前本地验证: 结构 / OHLC / 离谱跳变 / 跨源抽样(东财主 + 腾讯备)。
+    返回 (ok, report_lines); ok=False 时应中止上传。"""
+    import random
+    rep = []
+    n_dup = n_ohlc = n_jump = n_wild = n_short = 0
+    jump_list = []
+    codes = list(bars.keys())
+    for c in codes:
+        k = bars[c].get("k") or []
+        if len(k) < 30:
+            n_short += 1
+            if n_short <= 10:
+                rep.append(f"短序列: {c} 仅 {len(k)} 根")
+            continue
+        prev = None
+        for i2, r in enumerate(k):
+            if i2 and k[i2 - 1][0] == r[0]:
+                n_dup += 1
+                continue
+            try:
+                o, cl, h, l = float(r[1]), float(r[2]), float(r[3]), float(r[4])
+            except Exception:
+                n_ohlc += 1
+                continue
+            if not (0 < cl and l <= min(o, cl) and max(o, cl) <= h and l <= h):
+                n_ohlc += 1
+                if n_ohlc <= 10:
+                    rep.append(f"OHLC异常: {c} {r[0]} o{o} c{cl} h{h} l{l}")
+            if prev and prev > 0:
+                chg = cl / prev - 1.0
+                if abs(chg) > 0.115:
+                    n_jump += 1
+                    if len(jump_list) < 20:
+                        jump_list.append(f"{c} {r[0]} {chg * 100:+.1f}%")
+                if abs(chg) > 0.6:
+                    n_wild += 1
+            prev = cl
+    rep.append(f"结构: {len(codes)} 只 | 重复行 {n_dup} | OHLC异常 {n_ohlc} | "
+               f">11.5%跳变 {n_jump}(含除权,仅报告) | 离谱跳变(>60%) {n_wild} | 短序列 {n_short}")
+    rep.extend("  跳变: " + x for x in jump_list)
+    n_mism = 0
+    n_samp = 0
+    if cross_check:
+        random.seed()
+        for code in random.sample(codes, min(sample_n, len(codes))):
+            ref = None
+            try:
+                secid = ("1." if code.startswith("6") else "0.") + code
+                url = (f"https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}"
+                       f"&fields1=f1&fields2=f51,f52,f53,f54,f55&klt=101&fqt=0&beg=20260901&end=20260930")
+                obj = json.loads(worker_get(url))
+                ref = {x.split(",")[0]: float(x.split(",")[2])
+                       for x in ((obj.get("data") or {}).get("klines") or [])}
+            except Exception:
+                ref = None
+            if not ref:
+                try:
+                    sym = ("sh" if code.startswith("6") else "sz") + code
+                    obj = json.loads(worker_get(
+                        f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={sym},day,,,10,"))
+                    node = obj["data"][sym]
+                    rows = node.get("day") or node.get("qfqday") or []
+                    ref = {r[0].replace("-", ""): float(r[2]) for r in rows}
+                except Exception:
+                    ref = None
+            if not ref:
+                continue
+            for r in (bars[code].get("k") or [])[-6:]:
+                d = r[0].replace("-", "")
+                if d in ref:
+                    n_samp += 1
+                    if abs(float(r[2]) - ref[d]) > 0.03:
+                        n_mism += 1
+                        if n_mism <= 20:
+                            rep.append(f"跨源不一致: {code} {r[0]} bars={r[2]} ref={ref[d]}")
+        rep.append(f"跨源抽样(东财+腾讯): {n_samp} 个样本, 不一致 {n_mism}")
+    ok = (n_dup == 0) and (n_ohlc == 0) and (n_wild == 0) and (n_mism <= 1)
+    return ok, rep
 
 
 def screen_offline(bars_path, out_path):
@@ -295,5 +391,13 @@ if __name__ == "__main__":
         update()
     elif mode == "screen":
         screen_offline(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "pool.json")
+    elif mode == "validate":
+        jj = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+        vok, vrep = validate_bars(jj.get("bars", {}),
+                                  sample_n=int(sys.argv[3]) if len(sys.argv) > 3 else 30)
+        for line in vrep:
+            print("  " + line)
+        print("VALIDATE_OK" if vok else "VALIDATE_FAIL")
+        sys.exit(0 if vok else 2)
     else:
         print("unknown mode"); sys.exit(1)
