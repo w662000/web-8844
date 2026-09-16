@@ -285,8 +285,11 @@ def update():
 
 
 def validate_bars(bars, sample_n=30, cross_check=True):
-    """上传前本地验证: 结构 / OHLC / 离谱跳变 / 跨源抽样(东财主 + 腾讯备)。
-    返回 (ok, report_lines); ok=False 时应中止上传。"""
+    """上传前本地验证: 结构 / OHLC / 离谱跳变 / 跨源抽样(东财主 + 腾讯/新浪备)。
+    返回 (ok, report_lines); ok=False 时应中止上传。
+    兼容两种输入: 内部字典 {code: {...}} 或 完整包装 {"bars": {...}}。"""
+    if isinstance(bars.get("bars"), dict):
+        bars = bars["bars"]
     import random
     rep = []
     n_dup = n_ohlc = n_jump = n_wild = n_short = 0
@@ -340,14 +343,23 @@ def validate_bars(bars, sample_n=30, cross_check=True):
                        for x in ((obj.get("data") or {}).get("klines") or [])}
             except Exception:
                 ref = None
+            sym = ("sh" if code.startswith("6") else "sz") + code
             if not ref:
                 try:
-                    sym = ("sh" if code.startswith("6") else "sz") + code
                     obj = json.loads(worker_get(
                         f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={sym},day,,,10,"))
                     node = obj["data"][sym]
                     rows = node.get("day") or node.get("qfqday") or []
                     ref = {r[0].replace("-", ""): float(r[2]) for r in rows}
+                except Exception:
+                    ref = None
+            if not ref:
+                try:
+                    s2 = worker_get("https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20a=/"
+                                    "CN_MarketDataService.getKLineData?symbol=" + sym
+                                    + "&scale=240&ma=no&datalen=12")
+                    seg = s2[s2.find("["):s2.rfind("]") + 1]
+                    ref = {r["day"].replace("-", ""): float(r["close"]) for r in json.loads(seg)}
                 except Exception:
                     ref = None
             if not ref:
