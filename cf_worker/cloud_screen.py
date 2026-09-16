@@ -224,7 +224,8 @@ def update():
             continue
         bd8 = tq["date"] or today_cn.strftime("%Y%m%d")
         bdate = bd8[:4] + "-" + bd8[4:6] + "-" + bd8[6:8]
-        if tq["vol"] == 0 and tq["close"] <= 0:
+        if tq["close"] <= 0 or tq["open"] <= 0 or tq["high"] <= 0 or tq["low"] <= 0:
+            # 退化行情(停牌/数据缺失, 如 o/h/l=0 只带回滚收盘价): 跳过, 不写坏行
             skipped_susp += 1
             continue
         k = bars[c]["k"]
