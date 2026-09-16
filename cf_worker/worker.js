@@ -21,6 +21,7 @@ const POOL_URL = "https://raw.githubusercontent.com/w662000/web-8844/main/pool.j
 const SMTP_HOST = "smtp.126.com";
 const SMTP_PORT = 465;
 const BUY_VR_MIN = 1.0; // 量比阈值（与 scan_realtime 一致）
+const EXIT_BAND = 0.005; // 滞回带: 已在突破态时, 需跌破 ey*(1-0.5%) 才退出(防贴线抖动误报)
 const SEP = "━━━━━━━━━━━";
 const SEP_L = "─────";
 
@@ -157,9 +158,13 @@ async function tick(env, force) {
   } catch {}
 
   const curBroke = [], curBuy = [];
+  const prevBrokeSet = new Set(prev.broke);
   for (const c of codes) {
     const qq = q[c];
-    if (qq && qq.price > ema[c]) {
+    if (!qq) continue;
+    // 滞回带: 已在突破态 → 跌破 ey*(1-EXIT_BAND) 才退出; 未突破态 → 涨过 ey 即进入
+    const thr = prevBrokeSet.has(c) ? ema[c] * (1 - EXIT_BAND) : ema[c];
+    if (qq.price > thr) {
       curBroke.push(c);
       if (qq.vr >= BUY_VR_MIN) curBuy.push(c);
     }
