@@ -15,11 +15,13 @@ jobs:
       - name: 增量更新+筛选+推送云端
         env:
           WORKER_URL: https://webmon.wxatp.workers.dev
-          AUTH_TOKEN: *** secrets.WORKER_AUTH_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.WORKER_AUTH_TOKEN }}
         run: python cf_worker/cloud_screen.py update
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pool
-          path: pool.json
+          path: |
+            pool.json
+            cf_worker/pool_cloud.json
           retention-days: 30
