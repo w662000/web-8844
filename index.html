@@ -440,7 +440,6 @@ const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
       +'<div class="row"><span>现价 <b class="up">'+(dP>0?dP.toFixed(2):'…')+'</b>'+staleA+'</span><span>昨收 <b>'+c.pc.toFixed(2)+'</b></span><span>板收 <b>'+c.bc.toFixed(2)+'</b></span><span>距板 <b>'+c.g+'日</b></span></div>'
       +'<div class="row"><span>vs板收 <b>'+(vsBc!==null?vsBc.toFixed(1)+'%':'…')+'</b></span><span>板日 <b>'+c.bd+'</b></span><span>量比 <b>'+(dVr>0?dVr.toFixed(2):'…')+'</b></span><span>回调 <b>'+(c.back_days||'—')+'</b>日</span></div>'
       +(c.tomorrow_pass?'<div style="padding:6px 8px 2px;color:var(--grn);font-size:12px">★ 明日进入观察池(gap='+c.g+'→'+(c.g+1)+',深度'+(c.dc||0).toFixed(1)+'%,回调'+(c.back_days||0)+'日)</div>':'<div style="padding:6px 8px 2px;color:var(--muted);font-size:11px">卡点: '+(c.fail_reasons&&c.fail_reasons.join(', ')||'—')+'</div>')
-      +'<button class="latbtn" onclick="quickLatent(\''+c.sym+'\',\''+(name||c.sym).replace(/'/g,'')+'\','+dP.toFixed(2)+')">🐣 潜伏买入</button>'
       +'</div>'});
   }
   allRow.sort((a,b)=>b.g-a.g);
