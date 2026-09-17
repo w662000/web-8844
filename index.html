@@ -114,14 +114,14 @@ h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#3fb950,#58
   <div class="empty" id="hEmpty">暂无持仓 —— 买入后把代码/价格填上去，页面自动盯卖点</div>
 </div>
 <div class="metrics">
-  <div class="metric blue"><div class="v" id="mCand">-</div><div class="k">观察池总数</div></div>
+  <div class="metric blue"><div class="v" id="mCand">-</div><div class="k">严选池总数</div></div>
   <div class="metric red"><div class="v" id="mHit">-</div><div class="k">已突破EMA7</div></div>
   <div class="metric green"><div class="v" id="mBuy">-</div><div class="k">突破且放量（可买入）</div></div>
   <div class="metric yellow"><div class="v" id="mNear">-</div><div class="k">接近突破(≥98%)</div></div>
   <div class="metric blue"><div class="v" id="mAll">-</div><div class="k">候选池(10日2板)</div></div>
 </div>
-<div class="panel"><h2>🚨 已突破 EMA7（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="hitGrid"></div></div>
-<div class="panel watch"><h2>👀 未突破 · 观察池（按接近突破程度排序，黄色高亮适合埋伏）</h2><div class="grid" id="watchGrid"></div></div>
+<div class="panel"><h2>🚨 严选池·已突破EMA7（深度5~8%+真上穿，放量✅优先）</h2><div class="grid" id="hitGrid"></div></div>
+<div class="panel watch"><h2>👀 未突破 · 严选观察池（按接近突破程度排序）</h2><div class="grid" id="watchGrid"></div></div>
 <div class="panel mid"><h2>🚀 已突破EMA7 · 候选池（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="brokeGrid"></div></div>
 <div class="panel all"><h2>📋 候选池 · 10个交易日内有2连板（雷达全量，未筛深度）<span class="allCnt">（<em id="mAllCnt">-</em>只）</span></h2><div class="grid" id="allGrid"></div></div>
 <div class="foot" id="foot"></div>
@@ -306,7 +306,8 @@ function render(){
     const name=f[1]||c.name, price=parseFloat(f[3]);
     const pct=parseFloat(f[32])||0;
     const vol=(parseFloat(f[6])||0)*100;
-    const broke=price>c.ey;
+    /* 真上穿(与云端/严选语义对齐 2026-09-17): 现价>EMA7 且 昨收≤EMA7(防跳空高开虚高) */
+    const broke=price>c.ey&&c.pc<=c.ey;
     const ratio=price/c.ey;
     const pred=vol>0?vol/Math.max(progress(),0.02):0;
     const vr=c.vy>0?pred/c.vy:0;
@@ -341,8 +342,6 @@ function render(){
     if(it.broke){nHit++; if(it.volOk)nBuy++; hitHtml+=card.replace(/<\/div>$/, '<button class="brokebtn" onclick="quickBreak(\''+it.sym+'\',\''+(it.c.name||'').replace(/'/g,'')+'\','+it.price.toFixed(2)+')">🎯 突破买入</button></div>');}
     else{
       if(it.ratio>=.98)nNear++;
-      /* 潜伏买入按钮: 未突破的票可一键预填表单(改实际买入价后加入持仓) */
-      card=card.replace(/<\/div>$/, '<button class="latbtn" onclick="quickLatent(\''+it.sym+'\',\''+(it.c.name||'').replace(/'/g,'')+'\','+it.price.toFixed(2)+')">🐣 潜伏买入</button></div>');
       watchHtml+=card;
     }
   }
@@ -546,16 +545,6 @@ function addHolding(){
   saveHold(); renderHold();
   ['hCode','hName','hPrice','hDate'].forEach(id=>{const el=document.getElementById(id); if(el) el.value='';});
   speak((name||code)+' 已加入持仓',2);
-}
-function quickLatent(code,name,price){
-  /* 观察池一键埋伏: 把当前价填入表单, 用户改实际买入价后点加入 */
-  document.getElementById('hCode').value=code;
-  document.getElementById('hName').value=name||code;
-  document.getElementById('hPrice').value=price||'';
-  document.getElementById('hKind').value='latent';
-  document.getElementById('hDate').value=new Date().toISOString().slice(0,10);
-  const el=document.getElementById('hPrice'); if(el){ el.focus(); el.select(); }
-  speak((name||code)+' 待确认潜伏价位',2);
 }
 function quickBreak(code,name,price){
   /* 已突破候选池一键埋伏: 跟潜伏买入同款表单, 但默认"突破买入"类型 */
