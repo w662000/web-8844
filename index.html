@@ -89,6 +89,7 @@ h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#3fb950,#58
   </select>
   <button onclick="tick()">立即刷新</button>
   <label style="cursor:pointer"><input type="checkbox" id="snd" checked> 突破语音播报</label>
+  <label style="cursor:pointer"><input type="checkbox" id="sndStop" checked> 止损语音播报</label>
   <span class="progwrap" style="flex:1;max-width:260px">
     <span class="stausline" id="progTxt"></span>
     <div class="progtrack"><div class="progfill" id="progFill"></div></div>
@@ -198,8 +199,10 @@ function pickVoice(){
   _spkVoice=yaoyao||zh[0]||vs[0]||null;
   return _spkVoice;
 }
-function speak(text,times){
-  if(!$('snd').checked) return;
+function speak(text,times,gate){
+  /* gate='stop' 走止损开关(2026-09-21新增), 其余走突破开关 */
+  const cb=(gate==='stop')?$('sndStop'):$('snd');
+  if(cb && !cb.checked) return;
   if(!window.speechSynthesis){beep();return;}
   const n=(times&&times>=1)?times:1;
   try{
@@ -600,13 +603,13 @@ function markCross5(code){
   try{ const m=cross5Map(); m[code]=BDY; localStorage.setItem(LS_CROSS5, JSON.stringify(m)); }catch(e){}
   try{ const m=winX5(); m[code]=BDY; window.name=W5PFX+JSON.stringify(m); }catch(e){}
 }
-function fireAlarm(code,name,msg,spk){
+function fireAlarm(code,name,msg,spk,gate){
   if(alarmDone(code,msg)) return;
   alarmMark(code,msg);
   const nk=code+'|'+msg;
   if(!LAST_SPK[nk] || Date.now()-LAST_SPK[nk]>30000){
     LAST_SPK[nk]=Date.now();
-    speak(name+'：'+(spk||msg),1);
+    speak(name+'：'+(spk||msg),1,gate);
   }
   const card=document.querySelector('.hk[data-code="'+code+'"]');
   if(card){
@@ -653,7 +656,11 @@ function holdCardHTML(h, q, isStale){
       /* 未半仓=全仓风险: 止损最优先, 再+5%半仓提醒, 再T+6 */
       if(stopHit && tail===2){ alarm='🕒14:55 尾盘确认：跌破 -7% 止损，全部清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
       else if(stopHit && tail===1){ alarm='🕒14:50 尾盘确认：跌破 -7%，准备清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
-      else if(stopHit && mn<890){ /* 2026-09-02 用户拍板: 盘中触及 -7% 不再提醒(防洗盘错杀), 仅 14:50/14:55 尾盘两次确认 */ }
+      else if(stopHit && mn<890){
+        /* 2026-09-21 用户要求恢复盘中止损播报: 当日首次跌破播报一次(策略为收盘口径, 尾盘14:50/14:55双窗仍确认); sndStop 开关独立可关 */
+        fireAlarm(h.code,nm,'盘中已跌破 -7% 止损位（策略为收盘口径，尾盘14:50/14:55再确认）','盘中跌破止损位，注意风险','stop');
+        cls='alarm';
+      }
       else if(hi>=hal){
         const firstCross = !h.p5 || h.p5<hal;
         if(firstCross && !crossed5Today(h.code)){
@@ -680,7 +687,11 @@ function holdCardHTML(h, q, isStale){
       else if(hi>=hal && notToday){ alarm='再次摸 +5%（次日确认），剩余半仓全清锁利！'; spk='再次摸5%，全清锁定'; cls='sell5'; }
       else if(stopHit && tail===2){ alarm='🕒14:55 尾盘确认：档位未摸到且破 -7%，止损清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
       else if(stopHit && tail===1){ alarm='🕒14:50 尾盘确认：档位未摸到且破 -7%，准备清仓！'; spk='尾盘确认止损清仓'; cls='alarm'; }
-      else if(stopHit && mn<890){ /* 2026-09-02 用户拍板: 盘中止损静默, 仅尾盘确认 */ }
+      else if(stopHit && mn<890){
+        /* 2026-09-21 同步恢复: 余仓盘中首破止损播报一次, 尾盘双窗仍确认 */
+        fireAlarm(h.code,nm,'盘中已跌破 -7% 止损位，剩余仓位风险（尾盘14:50/14:55再确认）','盘中跌破止损位，注意风险','stop');
+        cls='alarm';
+      }
       else if(t6msg){ alarm=t6msg; spk=t6spk; cls='alarm'; }
     }
     if(alarm) fireAlarm(h.code, nm, alarm, spk);
