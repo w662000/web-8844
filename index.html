@@ -97,7 +97,7 @@ h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#3fb950,#58
   <span class="stausline" id="lastUpd">未加载</span>
 </div>
 <div class="panel hold">
-  <h2>📦 我的持仓 · 卖点提醒（A6C v2 规则，含潜伏仓）</h2>
+  <h2>📦 我的持仓 · 卖点提醒（A6C v2 规则，含潜伏仓）<span class="allCnt">（<em id="hCnt">-</em>只）</span></h2>
   <div class="holdform">
     <input type="text" id="hCode" placeholder="代码 e.g. 600000" maxlength="6">
     <input type="text" id="hName" placeholder="名称(选填)" maxlength="8">
@@ -121,9 +121,9 @@ h1{font-size:22px;margin-bottom:4px;background:linear-gradient(90deg,#3fb950,#58
   <div class="metric yellow"><div class="v" id="mNear">-</div><div class="k">接近突破(≥98%)</div></div>
   <div class="metric blue"><div class="v" id="mAll">-</div><div class="k">候选池(10日2板)</div></div>
 </div>
-<div class="panel"><h2>🚨 严选池·已突破EMA7（深度5~8%+真上穿，放量✅优先）</h2><div class="grid" id="hitGrid"></div></div>
-<div class="panel watch"><h2>👀 未突破 · 严选观察池（按接近突破程度排序）</h2><div class="grid" id="watchGrid"></div></div>
-<div class="panel mid"><h2>🚀 已突破EMA7 · 候选池（放量✅优先 / 放量❌待确认）</h2><div class="grid" id="brokeGrid"></div></div>
+<div class="panel"><h2>🚨 严选池·已突破EMA7（深度5~8%+真上穿，放量✅优先）<span class="allCnt">（<em id="hitCnt">-</em>只）</span></h2><div class="grid" id="hitGrid"></div></div>
+<div class="panel watch"><h2>👀 未突破 · 严选观察池（按接近突破程度排序）<span class="allCnt">（<em id="watchCnt">-</em>只）</span></h2><div class="grid" id="watchGrid"></div></div>
+<div class="panel mid"><h2>🚀 宽候选池·已突破EMA7（2连板回调·深度不限，放量✅优先）<span class="allCnt">（<em id="brokeCnt">-</em>只）</span></h2><div class="grid" id="brokeGrid"></div></div>
 <div class="panel all"><h2>📋 候选池 · 10个交易日内有2连板（雷达全量，未筛深度）<span class="allCnt">（<em id="mAllCnt">-</em>只）</span></h2><div class="grid" id="allGrid"></div></div>
 <div class="foot" id="foot"></div>
 </div>
@@ -367,12 +367,15 @@ function render(){
   $('mHit').textContent=nHit;
   $('mBuy').textContent=nBuy;
   $('mNear').textContent=nNear;
+  $('hitCnt').textContent=nHit;
+  $('watchCnt').textContent=items.length-nHit;
   $('hitGrid').innerHTML=hitHtml||'<div class="empty">暂无突破 —— 页面开着会自动盯盘，一旦有股票站上昨日EMA7立即标红+响铃并记录首次突破时间</div>';
   $('watchGrid').innerHTML=watchHtml||'<div class="empty">无</div>';
-  /* ---- 中部: 候选池内已突破EMA7(语音只提示突破, 不喊买入) ---- */
+  /* ---- 中部: 宽候选池实时突破(2026-11-26 与云端同口径: 全池重算, 站上EMA7且距板>=3日) ---- */
   const midHit=new Set();
   const brokeRow=[];
-  for(const c of BROKE){
+  for(const c of ALLPOOL){
+    if(c.g==null||c.g<3) continue;   /* 与云端 g>=3 对齐 */
 const y='v_'+mf(c.sym)+c.sym, raw=window[y];
     let name=c.name||'', price=0, pct=0, vr=0, volOk=false;
     if(raw){
@@ -386,9 +389,11 @@ const y='v_'+mf(c.sym)+c.sym, raw=window[y];
     }
     if(price>0) PX[c.sym]={price:price,pct:pct,vr:vr};           /* 成功 -> 写缓存 */
     const pcx=PX[c.sym]||{price:0,pct:0,vr:0}, dP=price>0?price:pcx.price, dPct=pct>0?pct:pcx.pct;  /* 展示价: 实时优先,缺失回退缓存 */
-    const cr7=price>0&&price>c.ey&&c.pc<=c.ey*1.02;   /* 真上穿判定只用实时价: 昨收≤EMA7×1.02 且 现价>EMA7 */
-    if(cr7) midHit.add(c.sym);   /* 上穿事件: 进入本轮集合, 与上轮差集即刚上穿(当日可多次) */
-    const stb=cr7?'<span class="tag b">突破✅</span>':'<span class="tag" style="color:var(--yellow)">未上穿/回踩</span>';
+    const plainBroke=price>0&&c.ey&&price>c.ey;   /* 宽池: 站上EMA7即算突破(与云端 plainBroke 一致) */
+    const cr7=plainBroke&&c.pc<=c.ey*1.02;        /* 真上穿标记: 昨收≤EMA7×1.02 */
+    if(!plainBroke) continue;                     /* 只展示当前已突破, 数量与云端宽池一致 */
+    midHit.add(c.sym);
+    const stb='<span class="tag b">突破✅</span>'+(cr7?'<span class="tag" style="color:var(--green)">真上穿</span>':'');
     const stv=volOk?'<span class="tag b">放量✅</span>':'<span class="tag">放量❌</span>';
     const zt3=price>0&&pct>=9.5?'<span class="tag v">封板警戒</span>':'';
     const staleB=price>0?'':'<span class="ld" style="font-size:11px">(缓存)</span>';
@@ -399,24 +404,25 @@ const y='v_'+mf(c.sym)+c.sym, raw=window[y];
       +'<span class="pct '+(dP>0&&pct>0?(pct>0?'up':'down'):'')+'">'+(pct>0?pct.toFixed(2)+'%':'—')+'</span></div>'
       +'<div class="row"><span>现价 <b class="up">'+(dP>0?dP.toFixed(2):'…')+'</b>'+staleB+'</span><span>EMA7 <b>'+c.ey.toFixed(3)+'</b></span><span>昨收 <b>'+c.pc.toFixed(2)+'</b></span><span>板收 <b>'+c.bc.toFixed(2)+'</b></span></div>'
       +'<div class="row"><span>量比 <b>'+(dP>0&&pcx.vr>0?pcx.vr.toFixed(2):(vr>0?vr.toFixed(2):'…'))+'</b>'+staleV+'</span><span>距板 <b>'+c.g+'日</b></span><span>板日 <b>'+c.bd+'</b></span></div>'
-      +'<div class="lbl">候选池内突破EMA7 · 仅提示不构成买入建议</div>'
+      +'<div class="lbl">宽候选池内突破EMA7 · 仅提示不构成买入建议</div>'
       +'<button class="brokebtn" onclick="quickBreak(\''+c.sym+'\',\''+(name||c.sym).replace(/'/g,'')+'\','+dP.toFixed(2)+')">🎯 突破买入</button>'
       +'</div>'});
   }
   brokeRow.sort((a,b)=>b.vr-a.vr||a.h1.length-b.h1.length);
+  $('brokeCnt').textContent=brokeRow.length;
   $('brokeGrid').innerHTML=brokeRow.map(r=>r.h1).join('')||'<div class="empty">候选池内暂无已突破EMA7 —— 突破即上这块并语音提示（不喊买入）</div>';
   if(!_mInit){ _mInit=true; brokeLast=new Set(midHit); }
   else{
-    /* 2026-09-17 用户定稿: 候选池(宽)与严选池只要往上突破EMA7都语音提示(去掉 size>0 漏播条件) */
+    /* 2026-11-26: 宽池新突破(非严选)语音提示, 与云端 nowWide 同语义 */
     [...midHit].filter(x=>!brokeLast.has(x)&&!CANDS.some(q=>q.sym===x)).forEach((x,i)=>{
-      const cc=BROKE.find(b=>b.sym===x);
+      const cc=ALLPOOL.find(b=>b.sym===x);
       if(cc) setTimeout(()=>speak((cc.name||cc.sym)+'已突破EMA7日线',2), i*2000);
     });
   }
-  for(const b of BROKE){ const s2='v_'+mf(b.sym)+b.sym; if(!window[s2] && brokeLast.has(b.sym)) midHit.add(b.sym); }
+  for(const b of ALLPOOL){ const s2='v_'+mf(b.sym)+b.sym; if(!window[s2] && brokeLast.has(b.sym)) midHit.add(b.sym); }
   brokeLast=midHit;
   /* ---- 底部候选池: 10日内2连板雷达 ---- */
-  $('mAll').textContent=ALLPOOL.length; var _ac=$('mAllCnt'); if(_ac){_ac.textContent=ALLPOOL.length;}
+  $('mAll').textContent=ALLPOOL.length;
   const allRow=[];
   for(const c of ALLPOOL){
 const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
@@ -429,6 +435,11 @@ const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
         vr=c.vy>0?(pred/c.vy):0;
         name=f[1]||name; PX[c.sym]={price:price,pct:pct,vr:vr};   /* 成功 -> 写缓存 */
       }
+    }
+    /* 2026-11-26 与云端对齐: 无实时行情 -> 灰色卡片 + 无行情标签(不用缓存价冒充实时) */
+    if(price<=0){
+      allRow.push({g:c.g, h:'<div class="stk far"><div class="top"><span class="name">'+(name||c.sym)+'</span><span class="code">'+c.sym+'</span><span class="tag">无行情</span></div></div>'});
+      continue;
     }
     const pcx=PX[c.sym]||{price:0,pct:0,vr:0}, dP=price>0?price:pcx.price, dVr=vr>0?vr:pcx.vr;
     const vsBc=dP>0&&c.bc>0?(dP/c.bc-1)*100:null;
@@ -447,6 +458,7 @@ const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
       +'</div>'});
   }
   allRow.sort((a,b)=>b.g-a.g);
+  $('mAllCnt').textContent=allRow.length;
   $('allGrid').innerHTML=allRow.map(r=>r.h).join('')||'<div class="empty">最近10个交易日内无 2 连板股</div>';
   const d=new Date();
   $('lastUpd').innerHTML='<span class="'+(d.getSeconds()%2?'blink':'')+'">'+d.toTimeString().slice(0,8)+' 更新</span>';
@@ -457,7 +469,7 @@ const sym='v_'+mf(c.sym)+c.sym, raw=window[sym];
 $('subinfo').textContent='数据库最新交易日 2026-11-26 · 定稿A6C口径：主板2连板 → 回调≥2日(收盘破板收98%) → 深度5~8% → gap∈{3,5,6,7}(剔4) → 昨收≤昨日EMA7(+2%容差) · 盘中判定：实时价>EMA7 且 预估全天量>昨量且>5日均量 → 放量✅可买入优先 · 卖出(A6C-v2)：+5%卖半仓 → 余仓15>10更高结算、再次摸5%全清 → 6日收盘清仓 · 收盘破-7%止损 · 观察池按接近突破程度自动排序 · 底部候选池=10个交易日内恰2连板的主板(雷达,未筛选)';
 $('foot').innerHTML='页面保持打开即自动盯盘（行情每 '
   + ($('iv')?($('iv').value/1000):60)
-  + ' 秒刷新，腾讯源延时约1-3秒；每1分钟整页重载以更新候选池）<br>首次突破时间为本机浏览器记录（localStorage），换设备或清缓存会丢失 · 数据仅供参考，不构成投资建议';
+  + ' 秒刷新，腾讯源延时约1-3秒；每分钟检查服务端池子，有更新自动重载）<br>首次突破时间为本机浏览器记录（localStorage），换设备或清缓存会丢失 · 灰色卡片=无行情（与云端同口径） · 数据仅供参考，不构成投资建议';
 
 /* ============ 我的持仓 · 卖点提醒 (A6C v2) ============ */
 const LS_HOLDS = 'fbjj_holdlist';
@@ -735,6 +747,7 @@ function inTradingNow(){
 function renderHold(){
   const g=document.getElementById('hGrid'), e=document.getElementById('hEmpty');
   if(!g) return;
+  $('hCnt').textContent=HOLDINGS.length;
   e.style.display=HOLDINGS.length?'none':'';
   if(!HOLDINGS.length){ g.innerHTML=''; return; }
   /* 先立即渲染骨架: 有缓存价就用缓存价(带'缓存'角标), 无缓存时才显示 … */
@@ -764,5 +777,19 @@ renderHold();
 setInterval(renderHold, 10000);   /* 持仓行情独立轮询(10秒兜底) */
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){tick();renderHold();}});
 window.addEventListener('storage',e=>{ if(e.key!==LS_HOLDS) return; try{ HOLDINGS=JSON.parse(e.newValue||'[]'); if(!Array.isArray(HOLDINGS)) HOLDINGS=[]; renderHold(); }catch(err){} });
+/* ---- 池子自愈(2026-11-26): 服务端HTML更新后自动重载, 防旧标签页拿旧池子配今日行情 ---- */
+(function(){
+  const loadedAt=Date.parse(document.lastModified)||0;
+  let checking=false;
+  setInterval(async()=>{
+    if(checking) return;
+    checking=true;
+    try{
+      const r=await fetch(location.href,{method:'HEAD',cache:'no-store'});
+      const lm=Date.parse(r.headers.get('Last-Modified')||'');
+      if(lm&&lm>loadedAt+1000) location.reload();
+    }catch(e){} finally{ checking=false; }
+  }, 60000);
+})();
 </script>
 </body></html>
